@@ -479,7 +479,8 @@ export async function createServer() {
   // Middleware for body parsing
   app.use(express.json({ limit: '20mb' }));
   app.use(express.urlencoded({ extended: true, limit: '20mb' }));
-  app.use(express.raw({ limit: '50mb', type: ['application/octet-stream', 'text/plain', 'application/x-routeros'] }));
+  app.use(express.text({ limit: '50mb', type: ['text/plain', 'text/*', 'application/x-www-form-urlencoded'] }));
+  app.use(express.raw({ limit: '50mb', type: ['application/octet-stream', 'application/x-routeros'] }));
 
   // Helper to get base URL
   const getAppBaseUrl = (req: Request) => {
@@ -734,13 +735,16 @@ export async function createServer() {
 # 2. Buat Script Backup Ekspor Konfigurasi & Kirim ke App
 /system script add name="${scriptName}" policy=read,write,policy,test source="\\
     :local devName [/system identity get name];\\
-    :local sysDate [/system clock get date];\\
-    :local fileName (\\\$devName . \\\"_backup.rsc\\\");\\
+    :local baseName (\\\$devName . \\\"_backup\\\");\\
+    :local fileName (\\\$baseName . \\\".rsc\\\");\\
     :log info (\\\"[AutoBackup] Memulai ekspor konfigurasi: \\\" . \\\$fileName);\\
-    /export show-sensitive file=\\\$fileName;\\
-    :delay 3s;\\
-    :log info (\\\"[AutoBackup] Mengunggah ke Backup Manager...\\\");\\
-    /tool fetch http-method=post upload=yes src-path=\\\$fileName url=\\\"${webhookUrl}\\\";\\
+    /export show-sensitive file=\\\$baseName;\\
+    :delay 4s;\\
+    :log info (\\\"[AutoBackup] Membaca isi konfigurasi...\\\");\\
+    :local fileContent [/file get [find name=\\\$fileName] contents];\\
+    :log info (\\\"[AutoBackup] Mengunggah konfigurasi ke Backup Manager...\\\");\\
+    :local postUrl (\\\"${webhookUrl}&filename=\\\" . \\\$fileName);\\
+    /tool fetch http-method=post http-header-field=\\\"Content-Type: text/plain\\\" http-data=\\\$fileContent url=\\\$postUrl;\\
     :log info (\\\"[AutoBackup] Konfigurasi berhasil terkirim ke server!\\\");\\
     /file remove [find name=\\\$fileName];\\
 "
@@ -754,19 +758,12 @@ export async function createServer() {
 
     // RouterOS Terminal Command for Binary Backup (.backup)
     const scriptContentBinary = `# =========================================================
-# MikroTik Auto Backup Script (Binary .backup Full System)
+# MikroTik Auto Backup Script (.rsc Text Export)
 # Target Device: ${device.name}
 # =========================================================
-
-/system script add name="autobackup-binary" policy=read,write,policy,test source="\\
-    :local devName [/system identity get name];\\
-    :local fileName (\\\$devName . \\\"_full.backup\\\");\\
-    /system backup save name=\\\$fileName;\\
-    :delay 3s;\\
-    /tool fetch http-method=post upload=yes src-path=\\\$fileName url=\\\"${webhookUrl}&type=backup\\\";\\
-    /file remove [find name=\\\$fileName];\\
-"
-/system scheduler add name="sched-autobackup-bin" interval=${intervalStr} start-time=${startTimeStr} on-event="autobackup-binary"
+# Catatan: File .backup binary MikroTik hanya dapat diunggah
+# melalui SFTP/FTP atau ditarik via REST API v7 (Pull).
+# Gunakan tab '.rsc Text Export' untuk ekspor skrip otomatis.
 `;
 
     res.json({

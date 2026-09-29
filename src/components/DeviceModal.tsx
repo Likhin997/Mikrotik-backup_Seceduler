@@ -180,8 +180,11 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Port
+              <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
+                <span>Port</span>
+                <span className="text-[10px] text-slate-400 font-normal">
+                  {protocol === 'rest_api' ? 'Port REST/SSL' : 'Web/Winbox'}
+                </span>
               </label>
               <input
                 type="number"
@@ -189,8 +192,12 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                 onChange={e => setPort(Number(e.target.value))}
                 min="1"
                 max="65535"
+                placeholder="443"
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500 transition-colors"
               />
+              <p className="text-[10px] text-slate-400 mt-1 leading-tight">
+                {protocol === 'rest_api' ? 'Port HTTPS www-ssl (443) atau www (80) MikroTik' : 'Port akses router (443 / 80 / 8291)'}
+              </p>
             </div>
           </div>
 
