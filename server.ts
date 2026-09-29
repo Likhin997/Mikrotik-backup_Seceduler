@@ -1205,7 +1205,7 @@ export async function createServer() {
     });
   });
 
-  // Helper to perform HTTP/HTTPS request to MikroTik RouterOS REST API
+  // Helper to perform HTTP/HTTPS request to MikroTik RouterOS REST API with redirect support
   function mikrotikRequest(options: {
     hostname: string;
     port: number;
@@ -1216,7 +1216,13 @@ export async function createServer() {
     useTls: boolean;
     body?: any;
     timeoutMs?: number;
-  }): Promise<{ status: number; headers: http.IncomingHttpHeaders; data: string }> {
+    redirectCount?: number;
+  }): Promise<{ status: number; headers: http.IncomingHttpHeaders; data: string; finalPort: number; finalTls: boolean }> {
+    const redirectCount = options.redirectCount || 0;
+    if (redirectCount > 4) {
+      return Promise.reject(new Error('Terlalu banyak redirect (max 4)'));
+    }
+
     return new Promise((resolve, reject) => {
       const isHttps = options.useTls;
       const client = isHttps ? https : http;
@@ -1227,7 +1233,8 @@ export async function createServer() {
       const postData = options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : undefined;
 
       const headers: Record<string, string> = {
-        'User-Agent': 'MikroTik-AutoBackup/1.0'
+        'User-Agent': 'MikroTik-AutoBackup/1.0',
+        'Accept': 'application/json, text/plain, */*'
       };
       if (authHeader) headers['Authorization'] = authHeader;
       if (postData) {
@@ -1243,23 +1250,45 @@ export async function createServer() {
           method: options.method,
           headers,
           rejectUnauthorized: false, // Bypasses self-signed SSL certs commonly used on RouterOS
-          timeout: options.timeoutMs || 15000
+          timeout: options.timeoutMs || 10000
         },
         res => {
+          // Handle HTTP redirect (e.g. port 80 redirecting to port 444 HTTPS)
+          if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location) {
+            const loc = res.headers.location;
+            try {
+              const parsedUrl = new URL(loc, `${isHttps ? 'https' : 'http'}://${options.hostname}:${options.port}`);
+              const nextTls = parsedUrl.protocol === 'https:';
+              const nextPort = parsedUrl.port ? Number(parsedUrl.port) : (nextTls ? 443 : 80);
+
+              console.log(`[REST API] Following redirect (${res.statusCode}) from ${options.hostname}:${options.port} to ${parsedUrl.hostname}:${nextPort}${parsedUrl.pathname}`);
+
+              mikrotikRequest({
+                ...options,
+                hostname: parsedUrl.hostname,
+                port: nextPort,
+                path: parsedUrl.pathname + parsedUrl.search,
+                useTls: nextTls,
+                redirectCount: redirectCount + 1
+              }).then(resolve).catch(reject);
+              return;
+            } catch (e) {}
+          }
+
           let raw = '';
           res.setEncoding('utf-8');
           res.on('data', chunk => {
             raw += chunk;
           });
           res.on('end', () => {
-            resolve({ status: res.statusCode || 0, headers: res.headers, data: raw });
+            resolve({ status: res.statusCode || 0, headers: res.headers, data: raw, finalPort: options.port, finalTls: isHttps });
           });
         }
       );
 
       req.on('timeout', () => {
         req.destroy();
-        reject(new Error(`Timeout (${options.timeoutMs || 15000}ms) saat menghubungi router di ${options.hostname}:${options.port}`));
+        reject(new Error(`Timeout (${options.timeoutMs || 10000}ms) saat menghubungi ${options.hostname}:${options.port}`));
       });
 
       req.on('error', err => {
@@ -1279,51 +1308,92 @@ export async function createServer() {
     version?: string;
     identity?: string;
     model?: string;
+    activePort?: number;
   }> {
-    const useTls = device.port === 444 || device.port === 443 ? true : Boolean(device.useTls);
+    // Determine candidate ports to probe (user port first, then alternatives 444, 80, 443)
+    const candidates: Array<{ port: number; useTls: boolean }> = [];
+    const isConfiguredTls = device.port === 444 || device.port === 443 || device.useTls;
+    candidates.push({ port: device.port, useTls: isConfiguredTls });
 
-    // 1. Verify credentials and get identity
+    if (device.port === 80) {
+      candidates.push({ port: 444, useTls: true });
+      candidates.push({ port: 443, useTls: true });
+    } else if (device.port === 444) {
+      candidates.push({ port: 80, useTls: false });
+      candidates.push({ port: 443, useTls: true });
+    } else if (device.port === 443) {
+      candidates.push({ port: 444, useTls: true });
+      candidates.push({ port: 80, useTls: false });
+    }
+
+    let activeCandidate = candidates[0];
     let identity = device.name;
     let version = '7.x';
     let model = device.model || 'MikroTik RouterOS';
+    let lastError: string | null = null;
+    let connected = false;
 
-    try {
-      const identRes = await mikrotikRequest({
-        hostname: device.ipHost,
-        port: device.port,
-        path: '/rest/system/identity',
-        method: 'GET',
-        username: device.username,
-        password: device.password,
-        useTls,
-        timeoutMs: 8000
-      });
+    // Phase 1: Probe candidate ports until one responds
+    for (const cand of candidates) {
+      try {
+        console.log(`[REST Pull] Mencoba port ${cand.port} (${cand.useTls ? 'HTTPS' : 'HTTP'}) untuk ${device.name}...`);
+        const identRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: cand.port,
+          path: '/rest/system/identity',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls: cand.useTls,
+          timeoutMs: 6000
+        });
 
-      if (identRes.status === 401 || identRes.status === 403) {
-        throw new Error(`Autentikasi ditolak (HTTP ${identRes.status}). Username (${device.username}) atau Password MikroTik tidak cocok.`);
+        if (identRes.status === 401 || identRes.status === 403) {
+          throw new Error(`Autentikasi ditolak (HTTP ${identRes.status}) di port ${cand.port}. Pastikan username (${device.username}) dan password login MikroTik Anda benar, serta user memiliki grup dengan hak akses 'rest-api'.`);
+        }
+
+        if (identRes.status === 200) {
+          activeCandidate = { port: identRes.finalPort || cand.port, useTls: identRes.finalTls !== undefined ? identRes.finalTls : cand.useTls };
+          connected = true;
+          try {
+            const parsed = JSON.parse(identRes.data);
+            if (parsed?.name) identity = parsed.name;
+          } catch (e) {}
+          console.log(`[REST Pull] Berhasil terhubung ke port ${activeCandidate.port} (${activeCandidate.useTls ? 'HTTPS' : 'HTTP'})`);
+          break;
+        } else {
+          lastError = `Port ${cand.port} mengembalikan HTTP ${identRes.status}`;
+        }
+      } catch (err: any) {
+        lastError = err.message;
+        if (err.message.includes('Autentikasi ditolak')) {
+          throw err;
+        }
+        console.warn(`[REST Pull] Percobaan port ${cand.port} gagal:`, err.message);
       }
+    }
 
-      if (identRes.status === 200 && identRes.data) {
-        try {
-          const parsed = JSON.parse(identRes.data);
-          if (parsed?.name) identity = parsed.name;
-        } catch (e) {}
-      }
-    } catch (err: any) {
-      if (err.message.includes('Autentikasi ditolak')) throw err;
-      console.warn(`[REST Pull] Identity check warning:`, err.message);
+    if (!connected) {
+      throw new Error(`Tidak dapat terhubung ke MikroTik ${device.ipHost} pada port ${candidates.map(c => c.port).join(', ')}. Detail: ${lastError || 'Koneksi ditolak/timeout'}.`);
+    }
+
+    // Update device port in memory if alternative worked
+    if (activeCandidate.port !== device.port) {
+      device.port = activeCandidate.port;
+      device.useTls = activeCandidate.useTls;
+      saveDatabase(db);
     }
 
     // 1b. Check resource info (RouterOS version & board-name)
     try {
       const resRes = await mikrotikRequest({
         hostname: device.ipHost,
-        port: device.port,
+        port: activeCandidate.port,
         path: '/rest/system/resource',
         method: 'GET',
         username: device.username,
         password: device.password,
-        useTls,
+        useTls: activeCandidate.useTls,
         timeoutMs: 8000
       });
       if (resRes.status === 200 && resRes.data) {
@@ -1333,9 +1403,7 @@ export async function createServer() {
           if (parsed?.['board-name']) model = parsed['board-name'];
         } catch (e) {}
       }
-    } catch (e) {
-      // Non-fatal
-    }
+    } catch (e) {}
 
     let exportedText = '';
 
@@ -1343,12 +1411,12 @@ export async function createServer() {
     try {
       const execRes = await mikrotikRequest({
         hostname: device.ipHost,
-        port: device.port,
+        port: activeCandidate.port,
         path: '/rest/execute',
         method: 'POST',
         username: device.username,
         password: device.password,
-        useTls,
+        useTls: activeCandidate.useTls,
         body: { script: ':export show-sensitive' },
         timeoutMs: 25000
       });
@@ -1377,12 +1445,12 @@ export async function createServer() {
       try {
         await mikrotikRequest({
           hostname: device.ipHost,
-          port: device.port,
+          port: activeCandidate.port,
           path: '/rest/export',
           method: 'POST',
           username: device.username,
           password: device.password,
-          useTls,
+          useTls: activeCandidate.useTls,
           body: { file: tempFileName, 'show-sensitive': '' },
           timeoutMs: 15000
         });
@@ -1391,12 +1459,12 @@ export async function createServer() {
 
         const fileRes = await mikrotikRequest({
           hostname: device.ipHost,
-          port: device.port,
+          port: activeCandidate.port,
           path: `/rest/file/${tempFileName}.rsc`,
           method: 'GET',
           username: device.username,
           password: device.password,
-          useTls,
+          useTls: activeCandidate.useTls,
           timeoutMs: 15000
         });
 
@@ -1417,12 +1485,12 @@ export async function createServer() {
         try {
           await mikrotikRequest({
             hostname: device.ipHost,
-            port: device.port,
+            port: activeCandidate.port,
             path: `/rest/file/${tempFileName}.rsc`,
             method: 'DELETE',
             username: device.username,
             password: device.password,
-            useTls,
+            useTls: activeCandidate.useTls,
             timeoutMs: 5000
           });
         } catch {}
@@ -1446,12 +1514,12 @@ export async function createServer() {
         // Pull interfaces
         const ifacesRes = await mikrotikRequest({
           hostname: device.ipHost,
-          port: device.port,
+          port: activeCandidate.port,
           path: '/rest/interface',
           method: 'GET',
           username: device.username,
           password: device.password,
-          useTls,
+          useTls: activeCandidate.useTls,
           timeoutMs: 8000
         });
         if (ifacesRes.status === 200) {
@@ -1474,12 +1542,12 @@ export async function createServer() {
         // Pull IP Addresses
         const ipRes = await mikrotikRequest({
           hostname: device.ipHost,
-          port: device.port,
+          port: activeCandidate.port,
           path: '/rest/ip/address',
           method: 'GET',
           username: device.username,
           password: device.password,
-          useTls,
+          useTls: activeCandidate.useTls,
           timeoutMs: 8000
         });
         if (ipRes.status === 200) {
@@ -1498,12 +1566,12 @@ export async function createServer() {
         // Pull IP Routes
         const routeRes = await mikrotikRequest({
           hostname: device.ipHost,
-          port: device.port,
+          port: activeCandidate.port,
           path: '/rest/ip/route',
           method: 'GET',
           username: device.username,
           password: device.password,
-          useTls,
+          useTls: activeCandidate.useTls,
           timeoutMs: 8000
         });
         if (routeRes.status === 200) {
@@ -1519,6 +1587,34 @@ export async function createServer() {
           } catch {}
         }
 
+        // Pull IP Firewall Filter
+        const fwRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: activeCandidate.port,
+          path: '/rest/ip/firewall/filter',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls: activeCandidate.useTls,
+          timeoutMs: 8000
+        });
+        if (fwRes.status === 200) {
+          try {
+            const fws = JSON.parse(fwRes.data);
+            if (Array.isArray(fws) && fws.length > 0) {
+              parts.push('/ip firewall filter');
+              fws.forEach((item: any) => {
+                const props = Object.entries(item)
+                  .filter(([k]) => !k.startsWith('.'))
+                  .map(([k, v]) => `${k}="${v}"`)
+                  .join(' ');
+                parts.push(`add ${props}`);
+              });
+              parts.push('');
+            }
+          } catch {}
+        }
+
         if (parts.length > 6) {
           exportedText = parts.join('\n');
         }
@@ -1528,14 +1624,15 @@ export async function createServer() {
     }
 
     if (!exportedText) {
-      throw new Error(`Tidak dapat membaca konfigurasi dari MikroTik ${device.ipHost}:${device.port}. Pastikan service REST API (${useTls ? 'www-ssl' : 'www'}) aktif dan user memiliki hak akses 'read' dan 'write'.`);
+      throw new Error(`Tidak dapat membaca konfigurasi dari MikroTik ${device.ipHost}:${activeCandidate.port}. Pastikan service REST API (${activeCandidate.useTls ? 'www-ssl' : 'www'}) aktif dan user memiliki hak akses 'read' dan 'write'.`);
     }
 
     return {
       content: exportedText,
       version,
       identity,
-      model
+      model,
+      activePort: activeCandidate.port
     };
   }
 
