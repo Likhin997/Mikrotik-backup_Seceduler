@@ -32,6 +32,7 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSection, setActiveSection] = useState<string>('all');
+  const [staticOnly, setStaticOnly] = useState<boolean>(true);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -53,6 +54,21 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
     }
   };
 
+  const isDynamicLine = (text: string) => {
+    return (
+      text.includes('interface=<') ||
+      text.includes('gateway=<') ||
+      text.includes('<l2tp-') ||
+      text.includes('<pptp-') ||
+      text.includes('<sstp-') ||
+      text.includes('<ovpn-') ||
+      text.includes('<macvlan') ||
+      text.includes('dynamic=yes') ||
+      text.includes('dynamic="true"') ||
+      text.includes('dynamic=true')
+    );
+  };
+
   const lines = useMemo(() => {
     return content.split(/\r?\n/);
   }, [content]);
@@ -71,6 +87,7 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
     ];
 
     lines.forEach(l => {
+      if (staticOnly && isDynamicLine(l)) return;
       const trimmed = l.trim();
       if (trimmed.startsWith('/interface')) list[1].count++;
       if (trimmed.startsWith('/ip address')) list[2].count++;
@@ -82,26 +99,35 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
     });
 
     return list;
-  }, [lines]);
+  }, [lines, staticOnly]);
 
   const filteredLines = useMemo(() => {
-    return lines.map((text, idx) => ({ text, lineNum: idx + 1 })).filter(item => {
-      const matchSearch = searchQuery
-        ? item.text.toLowerCase().includes(searchQuery.toLowerCase())
-        : true;
+    return lines
+      .map((text, idx) => ({ text, lineNum: idx + 1 }))
+      .filter(item => {
+        if (staticOnly && isDynamicLine(item.text)) {
+          return false;
+        }
 
-      if (!matchSearch) return false;
-      if (activeSection === 'all') return true;
+        const matchSearch = searchQuery
+          ? item.text.toLowerCase().includes(searchQuery.toLowerCase())
+          : true;
 
-      // Filter by section
-      return item.text.startsWith(activeSection) || activeSection.split(' ').some(k => item.text.includes(k));
-    });
-  }, [lines, searchQuery, activeSection]);
+        if (!matchSearch) return false;
+        if (activeSection === 'all') return true;
+
+        // Filter by section
+        return item.text.startsWith(activeSection) || activeSection.split(' ').some(k => item.text.includes(k));
+      });
+  }, [lines, searchQuery, activeSection, staticOnly]);
 
   if (!isOpen || !backup) return null;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(content);
+    const textToCopy = staticOnly
+      ? filteredLines.map(l => l.text).join('\n')
+      : content;
+    navigator.clipboard.writeText(textToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -206,8 +232,23 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
           </div>
 
           {/* Quick jump tags */}
-          <div className="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0 max-w-full text-xs">
-            <span className="text-slate-500 text-[11px] mr-1 hidden lg:inline">Filter Seksi:</span>
+          <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0 max-w-full text-xs">
+            {/* Static / Dynamic Toggle Button */}
+            <button
+              onClick={() => setStaticOnly(!staticOnly)}
+              className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border shrink-0 ${
+                staticOnly
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 shadow-xs'
+                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+              }`}
+              title={staticOnly ? 'Mode saat ini: Hanya statis. Klik untuk menampilkan semua (termasuk dinamis)' : 'Mode saat ini: Menampilkan semua. Klik untuk menyaring yang dinamis'}
+            >
+              <Check className={`w-3 h-3 ${staticOnly ? 'text-emerald-400' : 'opacity-30'}`} />
+              <span>{staticOnly ? 'Hanya Statis' : 'Semua (Termasuk Dinamis)'}</span>
+            </button>
+
+            <span className="text-slate-600 text-[11px] px-1 hidden lg:inline">|</span>
+            <span className="text-slate-500 text-[11px] mr-1 hidden lg:inline">Seksi:</span>
             {sections.slice(0, 6).map(sec => (
               <button
                 key={sec.prefix}

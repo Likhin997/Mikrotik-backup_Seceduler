@@ -822,7 +822,14 @@ export async function createServer() {
     if (fs.existsSync(backup.filePath)) {
       if (backup.fileType === 'rsc') {
         try {
-          fullContent = fs.readFileSync(backup.filePath, 'utf-8');
+          const raw = fs.readFileSync(backup.filePath, 'utf-8');
+          fullContent = filterStaticOnlyRsc(raw);
+          if (fullContent !== raw) {
+            fs.writeFileSync(backup.filePath, fullContent, 'utf-8');
+            backup.fileSize = Buffer.byteLength(fullContent, 'utf-8');
+            backup.metadata = parseRscStats(fullContent);
+            saveDatabase(db);
+          }
         } catch (err) {
           console.error('Failed reading rsc file:', err);
         }
@@ -1024,7 +1031,74 @@ export async function createServer() {
     }
   };
 
-  // 8. Universal Backup Ingestion (Webhook / RouterOS /tool fetch / Direct File Upload)
+// Helper to filter out all dynamic runtime entries (VPN client bindings, dynamic routes, dynamic DHCP leases, etc.)
+function filterStaticOnlyRsc(content: string): string {
+  const lines = content.split('\n');
+  const filteredLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Keep comments and section headers (like /ip address, /ip route, etc.)
+    if (trimmed.startsWith('#') || (trimmed.startsWith('/') && !trimmed.startsWith('//')) || trimmed === '') {
+      filteredLines.push(line);
+      continue;
+    }
+
+    // Filter out dynamic interface bindings: <l2tp-xxx>, <pptp-xxx>, <sstp-xxx>, <ovpn-xxx>, etc.
+    if (
+      line.includes('interface=<') ||
+      line.includes('gateway=<') ||
+      line.includes('<l2tp-') ||
+      line.includes('<pptp-') ||
+      line.includes('<sstp-') ||
+      line.includes('<ovpn-') ||
+      line.includes('<macvlan')
+    ) {
+      continue;
+    }
+
+    // Filter out explicit dynamic=yes or dynamic="true"
+    if (
+      line.includes('dynamic=yes') ||
+      line.includes('dynamic="true"') ||
+      line.includes('dynamic=true') ||
+      line.includes('connect=yes') ||
+      line.includes('connect="true"')
+    ) {
+      continue;
+    }
+
+    filteredLines.push(line);
+  }
+
+  // Remove empty section headers (e.g. if all entries in /ip route were dynamic VPN routes)
+  const cleaned: string[] = [];
+  for (let i = 0; i < filteredLines.length; i++) {
+    const current = filteredLines[i];
+    const trimmedCurrent = current.trim();
+
+    if (trimmedCurrent.startsWith('/')) {
+      // Look ahead to check if this section has at least one valid command (add, set, etc.)
+      let hasCommands = false;
+      for (let j = i + 1; j < filteredLines.length; j++) {
+        const nextTrimmed = filteredLines[j].trim();
+        if (nextTrimmed.startsWith('/')) break; // Next section reached
+        if (nextTrimmed.startsWith('add ') || nextTrimmed.startsWith('set ') || (nextTrimmed.length > 0 && !nextTrimmed.startsWith('#'))) {
+          hasCommands = true;
+          break;
+        }
+      }
+      if (!hasCommands) {
+        continue; // Skip section with no static commands
+      }
+    }
+    cleaned.push(current);
+  }
+
+  return cleaned.join('\n');
+}
+
+// 8. Universal Backup Ingestion (Webhook / RouterOS /tool fetch / Direct File Upload)
   app.all(['/api/backups/upload', '/api/backups/upload/:deviceId', '/api/backups/upload/:deviceId/:token'], upload.single('file'), async (req: Request, res: Response) => {
     const paramDeviceId = req.params?.deviceId;
     const paramToken = req.params?.token;
@@ -1588,7 +1662,7 @@ export async function createServer() {
           ''
         ];
 
-        // Pull interfaces
+        // Pull interfaces (Only static interfaces)
         const ifacesRes = await mikrotikRequest({
           hostname: device.ipHost,
           port: activeCandidate.port,
@@ -1603,20 +1677,29 @@ export async function createServer() {
           try {
             const ifaces = JSON.parse(ifacesRes.data);
             if (Array.isArray(ifaces) && ifaces.length > 0) {
-              parts.push('/interface');
-              ifaces.forEach((item: any) => {
-                const props = Object.entries(item)
-                  .filter(([k]) => !k.startsWith('.'))
-                  .map(([k, v]) => `${k}="${v}"`)
-                  .join(' ');
-                parts.push(`add ${props}`);
+              const staticIfaces = ifaces.filter((item: any) => {
+                if (item.dynamic === 'true' || item.dynamic === true || item.dynamic === 'yes') return false;
+                if (item.name && (item.name.startsWith('<') || item.name.includes('<'))) return false;
+                if (['l2tp-in', 'pptp-in', 'sstp-in', 'ovpn-in'].includes(item.type)) return false;
+                return true;
               });
-              parts.push('');
+
+              if (staticIfaces.length > 0) {
+                parts.push('/interface');
+                staticIfaces.forEach((item: any) => {
+                  const props = Object.entries(item)
+                    .filter(([k]) => !k.startsWith('.') && k !== 'running' && k !== 'actual-mtu')
+                    .map(([k, v]) => `${k}="${v}"`)
+                    .join(' ');
+                  parts.push(`add ${props}`);
+                });
+                parts.push('');
+              }
             }
           } catch {}
         }
 
-        // Pull IP Addresses
+        // Pull IP Addresses (Only static IP addresses, ignore dynamic VPN client addresses)
         const ipRes = await mikrotikRequest({
           hostname: device.ipHost,
           port: activeCandidate.port,
@@ -1631,16 +1714,24 @@ export async function createServer() {
           try {
             const ips = JSON.parse(ipRes.data);
             if (Array.isArray(ips) && ips.length > 0) {
-              parts.push('/ip address');
-              ips.forEach((item: any) => {
-                parts.push(`add address=${item.address} interface=${item.interface} network=${item.network || ''}`);
+              const staticIps = ips.filter((item: any) => {
+                if (item.dynamic === 'true' || item.dynamic === true || item.dynamic === 'yes') return false;
+                if (item.interface && (item.interface.startsWith('<') || item.interface.includes('<'))) return false;
+                return true;
               });
-              parts.push('');
+
+              if (staticIps.length > 0) {
+                parts.push('/ip address');
+                staticIps.forEach((item: any) => {
+                  parts.push(`add address=${item.address} interface=${item.interface} network=${item.network || ''}`);
+                });
+                parts.push('');
+              }
             }
           } catch {}
         }
 
-        // Pull IP Routes
+        // Pull IP Routes (Only static routes, ignore dynamic VPN & DAC connected routes)
         const routeRes = await mikrotikRequest({
           hostname: device.ipHost,
           port: activeCandidate.port,
@@ -1655,16 +1746,25 @@ export async function createServer() {
           try {
             const routes = JSON.parse(routeRes.data);
             if (Array.isArray(routes) && routes.length > 0) {
-              parts.push('/ip route');
-              routes.forEach((item: any) => {
-                parts.push(`add dst-address=${item['dst-address'] || '0.0.0.0/0'} gateway=${item.gateway || ''}`);
+              const staticRoutes = routes.filter((item: any) => {
+                if (item.dynamic === 'true' || item.dynamic === true || item.dynamic === 'yes') return false;
+                if (item.connect === 'true' || item.connect === true || item.connect === 'yes') return false;
+                if (item.gateway && (item.gateway.startsWith('<') || item.gateway.includes('<'))) return false;
+                return true;
               });
-              parts.push('');
+
+              if (staticRoutes.length > 0) {
+                parts.push('/ip route');
+                staticRoutes.forEach((item: any) => {
+                  parts.push(`add dst-address=${item['dst-address'] || '0.0.0.0/0'} gateway=${item.gateway || ''}`);
+                });
+                parts.push('');
+              }
             }
           } catch {}
         }
 
-        // Pull IP Firewall Filter
+        // Pull IP Firewall Filter (Static only)
         const fwRes = await mikrotikRequest({
           hostname: device.ipHost,
           port: activeCandidate.port,
@@ -1679,13 +1779,143 @@ export async function createServer() {
           try {
             const fws = JSON.parse(fwRes.data);
             if (Array.isArray(fws) && fws.length > 0) {
-              parts.push('/ip firewall filter');
-              fws.forEach((item: any) => {
-                const props = Object.entries(item)
-                  .filter(([k]) => !k.startsWith('.'))
-                  .map(([k, v]) => `${k}="${v}"`)
-                  .join(' ');
-                parts.push(`add ${props}`);
+              const staticFws = fws.filter((item: any) => item.dynamic !== 'true' && item.dynamic !== true);
+              if (staticFws.length > 0) {
+                parts.push('/ip firewall filter');
+                staticFws.forEach((item: any) => {
+                  const props = Object.entries(item)
+                    .filter(([k]) => !k.startsWith('.') && k !== 'bytes' && k !== 'packets')
+                    .map(([k, v]) => `${k}="${v}"`)
+                    .join(' ');
+                  parts.push(`add ${props}`);
+                });
+                parts.push('');
+              }
+            }
+          } catch {}
+        }
+
+        // Pull IP Firewall NAT (Static only)
+        const natRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: activeCandidate.port,
+          path: '/rest/ip/firewall/nat',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls: activeCandidate.useTls,
+          timeoutMs: 8000
+        });
+        if (natRes.status === 200) {
+          try {
+            const nats = JSON.parse(natRes.data);
+            if (Array.isArray(nats) && nats.length > 0) {
+              const staticNats = nats.filter((item: any) => item.dynamic !== 'true' && item.dynamic !== true);
+              if (staticNats.length > 0) {
+                parts.push('/ip firewall nat');
+                staticNats.forEach((item: any) => {
+                  const props = Object.entries(item)
+                    .filter(([k]) => !k.startsWith('.') && k !== 'bytes' && k !== 'packets')
+                    .map(([k, v]) => `${k}="${v}"`)
+                    .join(' ');
+                  parts.push(`add ${props}`);
+                });
+                parts.push('');
+              }
+            }
+          } catch {}
+        }
+
+        // Pull IP DNS
+        const dnsRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: activeCandidate.port,
+          path: '/rest/ip/dns',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls: activeCandidate.useTls,
+          timeoutMs: 6000
+        });
+        if (dnsRes.status === 200) {
+          try {
+            const dns = JSON.parse(dnsRes.data);
+            if (dns?.servers) {
+              parts.push('/ip dns');
+              parts.push(`set servers="${dns.servers}" allow-remote-requests="${dns['allow-remote-requests'] || 'no'}"`);
+              parts.push('');
+            }
+          } catch {}
+        }
+
+        // Pull IP Pools
+        const poolRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: activeCandidate.port,
+          path: '/rest/ip/pool',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls: activeCandidate.useTls,
+          timeoutMs: 6000
+        });
+        if (poolRes.status === 200) {
+          try {
+            const pools = JSON.parse(poolRes.data);
+            if (Array.isArray(pools) && pools.length > 0) {
+              parts.push('/ip pool');
+              pools.forEach((item: any) => {
+                parts.push(`add name="${item.name}" ranges="${item.ranges}"`);
+              });
+              parts.push('');
+            }
+          } catch {}
+        }
+
+        // Pull PPP Profiles & Secrets (VPN Configuration)
+        const pppProfRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: activeCandidate.port,
+          path: '/rest/ppp/profile',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls: activeCandidate.useTls,
+          timeoutMs: 6000
+        });
+        if (pppProfRes.status === 200) {
+          try {
+            const profs = JSON.parse(pppProfRes.data);
+            if (Array.isArray(profs) && profs.length > 0) {
+              const customProfs = profs.filter((p: any) => p.name !== 'default' && p.name !== 'default-encryption');
+              if (customProfs.length > 0) {
+                parts.push('/ppp profile');
+                customProfs.forEach((p: any) => {
+                  parts.push(`add name="${p.name}" ${p['local-address'] ? `local-address="${p['local-address']}"` : ''} ${p['remote-address'] ? `remote-address="${p['remote-address']}"` : ''}`);
+                });
+                parts.push('');
+              }
+            }
+          } catch {}
+        }
+
+        const pppSecRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: activeCandidate.port,
+          path: '/rest/ppp/secret',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls: activeCandidate.useTls,
+          timeoutMs: 6000
+        });
+        if (pppSecRes.status === 200) {
+          try {
+            const secrets = JSON.parse(pppSecRes.data);
+            if (Array.isArray(secrets) && secrets.length > 0) {
+              parts.push('/ppp secret');
+              secrets.forEach((s: any) => {
+                parts.push(`add name="${s.name}" service="${s.service || 'any'}" profile="${s.profile || 'default'}" ${s.password ? `password="${s.password}"` : ''} ${s['local-address'] ? `local-address="${s['local-address']}"` : ''} ${s['remote-address'] ? `remote-address="${s['remote-address']}"` : ''}`);
               });
               parts.push('');
             }
@@ -1704,8 +1934,11 @@ export async function createServer() {
       throw new Error(`Tidak dapat membaca konfigurasi dari MikroTik ${device.ipHost}:${activeCandidate.port}. Pastikan service REST API (${activeCandidate.useTls ? 'www-ssl' : 'www'}) aktif dan user memiliki hak akses 'read' dan 'write'.`);
     }
 
+    // Always sanitize to ensure ONLY clean static configuration is preserved
+    const sanitizedText = filterStaticOnlyRsc(exportedText);
+
     return {
-      content: exportedText,
+      content: sanitizedText,
       version,
       identity,
       model,
