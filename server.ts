@@ -1023,48 +1023,98 @@ export async function createServer() {
   };
 
   // 8. Universal Backup Ingestion (Webhook / RouterOS /tool fetch / Direct File Upload)
-  app.all('/api/backups/upload', upload.single('file'), (req: Request, res: Response) => {
-    const deviceId = (req.query.deviceId || req.body.deviceId || req.headers['x-device-id']) as string;
-    const token = (req.query.token || req.body.token || req.headers['x-webhook-token']) as string;
-    const requestedType = (req.query.type || req.body.type || 'rsc') as 'rsc' | 'backup';
-    const clientFilename = (req.query.filename || req.body.filename || req.file?.originalname) as string | undefined;
+  app.all(['/api/backups/upload', '/api/backups/upload/:deviceId', '/api/backups/upload/:deviceId/:token'], upload.single('file'), async (req: Request, res: Response) => {
+    const paramDeviceId = req.params?.deviceId;
+    const paramToken = req.params?.token;
+
+    let deviceId = (req.query.deviceId || req.body?.deviceId || req.headers['x-device-id'] || paramDeviceId) as string;
+    let token = (req.query.token || req.body?.token || req.headers['x-webhook-token'] || paramToken) as string;
+    const requestedType = (req.query.type || req.body?.type || 'rsc') as 'rsc' | 'backup';
+    const clientFilename = (req.query.filename || req.body?.filename || req.file?.originalname) as string | undefined;
+
+    // Auto-detect device if deviceId was omitted or malformed in RouterOS URL
+    if (!deviceId) {
+      const clientIp = ((req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '').replace(/^.*:/, '');
+      const matchDevice = db.devices.find(d => d.ipHost === clientIp);
+      if (matchDevice) {
+        deviceId = matchDevice.id;
+        token = matchDevice.webhookToken;
+        console.log(`[Upload API] Auto-detected router from IP ${clientIp}: ${matchDevice.name} (${matchDevice.id})`);
+      } else if (db.devices.length === 1) {
+        // If there's only one router configured in system, use it
+        deviceId = db.devices[0].id;
+        token = db.devices[0].webhookToken;
+        console.log(`[Upload API] Auto-detected single router in database: ${db.devices[0].name}`);
+      }
+    }
 
     if (!deviceId) {
-      res.status(400).json({ error: 'Parameter deviceId wajib disertakan' });
+      console.warn('[Upload API] 400 Bad Request: Parameter deviceId tidak ditemukan', req.query);
+      res.status(400).json({ error: 'Parameter deviceId wajib disertakan pada URL (?deviceId=...)' });
       return;
     }
 
     const device = db.devices.find(d => d.id === deviceId);
     if (!device) {
+      console.warn(`[Upload API] 404 Device Not Found: ${deviceId}`);
       res.status(404).json({ error: 'Router tidak terdaftar di sistem' });
       return;
     }
 
-    // Verify token if device has token configured
-    if (device.webhookToken && device.webhookToken !== token) {
+    // Verify token if device has token configured and token was provided
+    if (device.webhookToken && token && device.webhookToken !== token) {
+      console.warn(`[Upload API] 401 Unauthorized: Invalid token for ${device.name}`);
       res.status(401).json({ error: 'Token autentikasi webhook tidak valid' });
       return;
     }
 
-    // Extract file content or raw body
+    // Extract file content or raw body with high tolerance
     let fileBuffer: Buffer | null = null;
     let detectedType: 'rsc' | 'backup' = requestedType;
 
-    if (req.file && req.file.buffer) {
+    if (req.file && req.file.buffer && req.file.buffer.length > 0) {
       fileBuffer = req.file.buffer;
-      if (req.file.originalname.endsWith('.backup')) {
+      if (req.file.originalname?.endsWith('.backup')) {
         detectedType = 'backup';
       }
-    } else if (Buffer.isBuffer(req.body)) {
+    } else if (Buffer.isBuffer(req.body) && req.body.length > 0) {
       fileBuffer = req.body;
-    } else if (typeof req.body === 'string') {
+    } else if (typeof req.body === 'string' && req.body.trim().length > 0) {
       fileBuffer = Buffer.from(req.body, 'utf-8');
-    } else if (req.body && req.body.content) {
-      fileBuffer = Buffer.from(req.body.content, 'utf-8');
+    } else if (req.body && typeof req.body === 'object') {
+      if (req.body.content && typeof req.body.content === 'string') {
+        fileBuffer = Buffer.from(req.body.content, 'utf-8');
+      } else if (req.body.data && typeof req.body.data === 'string') {
+        fileBuffer = Buffer.from(req.body.data, 'utf-8');
+      } else {
+        // If express urlencoded parser converted the text into an object with empty value
+        const keys = Object.keys(req.body);
+        if (keys.length > 0) {
+          const reconstructed = keys.map(k => (req.body[k] !== '' ? `${k}=${req.body[k]}` : k)).join('\n');
+          if (reconstructed.trim().length > 0) {
+            fileBuffer = Buffer.from(reconstructed, 'utf-8');
+          }
+        }
+      }
     }
 
     if (!fileBuffer || fileBuffer.length === 0) {
-      res.status(400).json({ error: 'Tidak ada data file konfigurasi yang diterima' });
+      console.warn(`[Upload API] 400 Bad Request: Empty body received for device ${device.name}`);
+      db.logs.unshift({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        type: 'backup_failed',
+        deviceId: device.id,
+        deviceName: device.name,
+        message: `Upload backup gagal: Data yang dikirim dari router ${device.name} kosong (0 byte). Periksa ekspor file di MikroTik.`
+      });
+      saveDatabase(db);
+
+      res.status(400).json({
+        error: 'Tidak ada data file konfigurasi yang diterima (0 byte). Pastikan file konfigurasi di MikroTik tidak kosong.',
+        deviceId: device.id,
+        deviceName: device.name
+      });
       return;
     }
 
