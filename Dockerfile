@@ -6,7 +6,8 @@ WORKDIR /app
 
 # Install build dependencies
 COPY package*.json ./
-RUN npm install
+COPY .npmrc ./
+RUN npm install --legacy-peer-deps
 
 # Copy all source files
 COPY . .
@@ -25,7 +26,8 @@ ENV PORT=3000
 
 # Install production dependencies only
 COPY package*.json ./
-RUN npm install --omit=dev && \
+COPY .npmrc ./
+RUN npm install --omit=dev --legacy-peer-deps && \
     npm install -g tsx
 
 # Copy built assets and backend server script from builder stage
