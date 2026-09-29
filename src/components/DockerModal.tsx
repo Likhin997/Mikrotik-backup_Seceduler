@@ -78,6 +78,14 @@ cd NAMA_REPO
 chmod +x install.sh
 ./install.sh`;
 
+  const gitUpdateScript = `# Jalankan update otomatis di server Anda:
+chmod +x update.sh
+./update.sh
+
+# Atau secara manual:
+git pull
+docker compose up -d --build`;
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -243,6 +251,24 @@ chmod +x install.sh
                 <div className="relative">
                   <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-emerald-300 overflow-x-auto max-h-40 leading-relaxed">
                     <code>{gitInstallScript}</code>
+                  </pre>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between text-slate-300 mb-1 font-semibold">
+                  <span>C. Cara Update Source Code (Aplikasi di Server):</span>
+                  <button
+                    onClick={() => handleCopy(gitUpdateScript, 'cmd-update')}
+                    className="text-cyan-400 hover:text-cyan-300 flex items-center space-x-1 font-normal text-[11px]"
+                  >
+                    {copiedKey === 'cmd-update' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedKey === 'cmd-update' ? 'Tersalin' : 'Salin Script Update'}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-amber-300 overflow-x-auto max-h-40 leading-relaxed">
+                    <code>{gitUpdateScript}</code>
                   </pre>
                 </div>
               </div>

@@ -108,15 +108,35 @@ Semua data tersimpan otomatis di host pada folder `./data`:
 
 ---
 
+## 🔄 Cara Update Source Code (Aplikasi)
+
+Jika ada pembaruan kode di GitHub atau perbaikan file:
+
+### Cara 1: Menggunakan Script Otomatis (Rekomendasi)
+Di dalam folder proyek di server, cukup jalankan:
+```bash
+chmod +x update.sh
+./update.sh
+```
+*Script ini otomatis menarik update dari git (`git pull`), mem-build ulang image Docker, dan me-restart container. Semua data konfigurasi router dan file backup di `./data` tetap aman 100%.*
+
+### Cara 2: Cara Manual
+```bash
+git pull origin main
+docker compose up -d --build
+```
+
+---
+
 ## 🛠️ Perintah Berguna (Maintenance)
 
 | Tugas | Perintah |
 |---|---|
+| **Update source code aplikasi** | `./update.sh` atau `git pull && docker compose up -d --build` |
 | **Cek status container** | `docker ps -f name=mikrotik-backup-app` |
 | **Lihat live log** | `docker logs -f mikrotik-backup-app` |
 | **Restart aplikasi** | `docker compose restart` |
 | **Stop aplikasi** | `docker compose down` |
-| **Update aplikasi terbaru** | `docker compose up -d --build` |
 
 ---
 
