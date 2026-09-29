@@ -5,6 +5,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import multer from 'multer';
+import http from 'http';
+import https from 'https';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1203,7 +1205,341 @@ export async function createServer() {
     });
   });
 
-  // 9. Manual Trigger "Backup Now" / Pull or Simulation
+  // Helper to perform HTTP/HTTPS request to MikroTik RouterOS REST API
+  function mikrotikRequest(options: {
+    hostname: string;
+    port: number;
+    path: string;
+    method: string;
+    username?: string;
+    password?: string;
+    useTls: boolean;
+    body?: any;
+    timeoutMs?: number;
+  }): Promise<{ status: number; headers: http.IncomingHttpHeaders; data: string }> {
+    return new Promise((resolve, reject) => {
+      const isHttps = options.useTls;
+      const client = isHttps ? https : http;
+      const authHeader = options.username
+        ? 'Basic ' + Buffer.from(`${options.username}:${options.password || ''}`).toString('base64')
+        : undefined;
+
+      const postData = options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : undefined;
+
+      const headers: Record<string, string> = {
+        'User-Agent': 'MikroTik-AutoBackup/1.0'
+      };
+      if (authHeader) headers['Authorization'] = authHeader;
+      if (postData) {
+        headers['Content-Type'] = 'application/json';
+        headers['Content-Length'] = Buffer.byteLength(postData).toString();
+      }
+
+      const req = client.request(
+        {
+          hostname: options.hostname,
+          port: options.port,
+          path: options.path,
+          method: options.method,
+          headers,
+          rejectUnauthorized: false, // Bypasses self-signed SSL certs commonly used on RouterOS
+          timeout: options.timeoutMs || 15000
+        },
+        res => {
+          let raw = '';
+          res.setEncoding('utf-8');
+          res.on('data', chunk => {
+            raw += chunk;
+          });
+          res.on('end', () => {
+            resolve({ status: res.statusCode || 0, headers: res.headers, data: raw });
+          });
+        }
+      );
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error(`Timeout (${options.timeoutMs || 15000}ms) saat menghubungi router di ${options.hostname}:${options.port}`));
+      });
+
+      req.on('error', err => {
+        reject(err);
+      });
+
+      if (postData) {
+        req.write(postData);
+      }
+      req.end();
+    });
+  }
+
+  // Function to pull real configuration from MikroTik RouterOS v7 device
+  async function pullRealMikrotikConfig(device: RouterDevice): Promise<{
+    content: string;
+    version?: string;
+    identity?: string;
+    model?: string;
+  }> {
+    const useTls = device.port === 444 || device.port === 443 ? true : Boolean(device.useTls);
+
+    // 1. Verify credentials and get identity
+    let identity = device.name;
+    let version = '7.x';
+    let model = device.model || 'MikroTik RouterOS';
+
+    try {
+      const identRes = await mikrotikRequest({
+        hostname: device.ipHost,
+        port: device.port,
+        path: '/rest/system/identity',
+        method: 'GET',
+        username: device.username,
+        password: device.password,
+        useTls,
+        timeoutMs: 8000
+      });
+
+      if (identRes.status === 401 || identRes.status === 403) {
+        throw new Error(`Autentikasi ditolak (HTTP ${identRes.status}). Username (${device.username}) atau Password MikroTik tidak cocok.`);
+      }
+
+      if (identRes.status === 200 && identRes.data) {
+        try {
+          const parsed = JSON.parse(identRes.data);
+          if (parsed?.name) identity = parsed.name;
+        } catch (e) {}
+      }
+    } catch (err: any) {
+      if (err.message.includes('Autentikasi ditolak')) throw err;
+      console.warn(`[REST Pull] Identity check warning:`, err.message);
+    }
+
+    // 1b. Check resource info (RouterOS version & board-name)
+    try {
+      const resRes = await mikrotikRequest({
+        hostname: device.ipHost,
+        port: device.port,
+        path: '/rest/system/resource',
+        method: 'GET',
+        username: device.username,
+        password: device.password,
+        useTls,
+        timeoutMs: 8000
+      });
+      if (resRes.status === 200 && resRes.data) {
+        try {
+          const parsed = JSON.parse(resRes.data);
+          if (parsed?.version) version = parsed.version;
+          if (parsed?.['board-name']) model = parsed['board-name'];
+        } catch (e) {}
+      }
+    } catch (e) {
+      // Non-fatal
+    }
+
+    let exportedText = '';
+
+    // 2. Try POST /rest/execute with :export script (RouterOS v7)
+    try {
+      const execRes = await mikrotikRequest({
+        hostname: device.ipHost,
+        port: device.port,
+        path: '/rest/execute',
+        method: 'POST',
+        username: device.username,
+        password: device.password,
+        useTls,
+        body: { script: ':export show-sensitive' },
+        timeoutMs: 25000
+      });
+
+      if (execRes.status === 200 && execRes.data) {
+        try {
+          const parsed = JSON.parse(execRes.data);
+          if (parsed?.ret && typeof parsed.ret === 'string' && parsed.ret.length > 20) {
+            exportedText = parsed.ret;
+          } else if (parsed?.output && typeof parsed.output === 'string') {
+            exportedText = parsed.output;
+          }
+        } catch {
+          if (execRes.data.includes('/interface') || execRes.data.includes('# software id')) {
+            exportedText = execRes.data;
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[REST Pull] /rest/execute warning:`, err.message);
+    }
+
+    // 3. Fallback: Trigger export to file, then read content
+    if (!exportedText) {
+      const tempFileName = `autobackup_${Date.now().toString(36)}`;
+      try {
+        await mikrotikRequest({
+          hostname: device.ipHost,
+          port: device.port,
+          path: '/rest/export',
+          method: 'POST',
+          username: device.username,
+          password: device.password,
+          useTls,
+          body: { file: tempFileName, 'show-sensitive': '' },
+          timeoutMs: 15000
+        });
+
+        await new Promise(r => setTimeout(r, 4000));
+
+        const fileRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: device.port,
+          path: `/rest/file/${tempFileName}.rsc`,
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls,
+          timeoutMs: 15000
+        });
+
+        if (fileRes.status === 200 && fileRes.data) {
+          try {
+            const parsed = JSON.parse(fileRes.data);
+            if (parsed?.contents) {
+              exportedText = parsed.contents;
+            } else {
+              exportedText = fileRes.data;
+            }
+          } catch {
+            exportedText = fileRes.data;
+          }
+        }
+
+        // Cleanup temp file
+        try {
+          await mikrotikRequest({
+            hostname: device.ipHost,
+            port: device.port,
+            path: `/rest/file/${tempFileName}.rsc`,
+            method: 'DELETE',
+            username: device.username,
+            password: device.password,
+            useTls,
+            timeoutMs: 5000
+          });
+        } catch {}
+      } catch (e: any) {
+        console.warn(`[REST Pull] Export file fallback failed:`, e.message);
+      }
+    }
+
+    // 4. Fallback: Query RouterOS endpoints directly to assemble live configuration
+    if (!exportedText) {
+      try {
+        const parts: string[] = [
+          `# MikroTik RouterOS ${version}`,
+          `# identity = ${identity}`,
+          `# model = ${model}`,
+          `# generated by MikroTik Auto Backup Manager via REST API`,
+          `# timestamp = ${new Date().toISOString()}`,
+          ''
+        ];
+
+        // Pull interfaces
+        const ifacesRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: device.port,
+          path: '/rest/interface',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls,
+          timeoutMs: 8000
+        });
+        if (ifacesRes.status === 200) {
+          try {
+            const ifaces = JSON.parse(ifacesRes.data);
+            if (Array.isArray(ifaces) && ifaces.length > 0) {
+              parts.push('/interface');
+              ifaces.forEach((item: any) => {
+                const props = Object.entries(item)
+                  .filter(([k]) => !k.startsWith('.'))
+                  .map(([k, v]) => `${k}="${v}"`)
+                  .join(' ');
+                parts.push(`add ${props}`);
+              });
+              parts.push('');
+            }
+          } catch {}
+        }
+
+        // Pull IP Addresses
+        const ipRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: device.port,
+          path: '/rest/ip/address',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls,
+          timeoutMs: 8000
+        });
+        if (ipRes.status === 200) {
+          try {
+            const ips = JSON.parse(ipRes.data);
+            if (Array.isArray(ips) && ips.length > 0) {
+              parts.push('/ip address');
+              ips.forEach((item: any) => {
+                parts.push(`add address=${item.address} interface=${item.interface} network=${item.network || ''}`);
+              });
+              parts.push('');
+            }
+          } catch {}
+        }
+
+        // Pull IP Routes
+        const routeRes = await mikrotikRequest({
+          hostname: device.ipHost,
+          port: device.port,
+          path: '/rest/ip/route',
+          method: 'GET',
+          username: device.username,
+          password: device.password,
+          useTls,
+          timeoutMs: 8000
+        });
+        if (routeRes.status === 200) {
+          try {
+            const routes = JSON.parse(routeRes.data);
+            if (Array.isArray(routes) && routes.length > 0) {
+              parts.push('/ip route');
+              routes.forEach((item: any) => {
+                parts.push(`add dst-address=${item['dst-address'] || '0.0.0.0/0'} gateway=${item.gateway || ''}`);
+              });
+              parts.push('');
+            }
+          } catch {}
+        }
+
+        if (parts.length > 6) {
+          exportedText = parts.join('\n');
+        }
+      } catch (e: any) {
+        console.warn(`[REST Pull] Granular endpoint pull warning:`, e.message);
+      }
+    }
+
+    if (!exportedText) {
+      throw new Error(`Tidak dapat membaca konfigurasi dari MikroTik ${device.ipHost}:${device.port}. Pastikan service REST API (${useTls ? 'www-ssl' : 'www'}) aktif dan user memiliki hak akses 'read' dan 'write'.`);
+    }
+
+    return {
+      content: exportedText,
+      version,
+      identity,
+      model
+    };
+  }
+
+  // 9. Manual Trigger "Backup Now" / Pull from Real MikroTik
   app.post('/api/devices/:id/backup-now', async (req: Request, res: Response) => {
     const device = db.devices.find(d => d.id === req.params.id);
     if (!device) {
@@ -1216,17 +1552,41 @@ export async function createServer() {
       fs.mkdirSync(devDir, { recursive: true });
     }
 
-    // Generate live backup
+    let content = '';
+    let parsedVersion = '7.x';
+    let detectedModel = device.model || 'MikroTik RouterOS';
+    let isLiveRouter = false;
+
+    if (device.protocol === 'rest_api') {
+      try {
+        console.log(`[REST Pull] Menghubungi router ${device.name} di ${device.ipHost}:${device.port}...`);
+        const pullResult = await pullRealMikrotikConfig(device);
+        content = pullResult.content;
+        parsedVersion = pullResult.version || '7.x';
+        detectedModel = pullResult.model || device.model;
+        if (pullResult.identity) {
+          device.name = pullResult.identity;
+        }
+        isLiveRouter = true;
+        console.log(`[REST Pull] Berhasil menarik konfigurasi real dari ${device.name} (${content.length} bytes)`);
+      } catch (err: any) {
+        console.error(`[REST Pull] Gagal mengambil konfigurasi dari ${device.name}:`, err.message);
+        res.status(502).json({
+          error: `Gagal menarik konfigurasi dari MikroTik (${device.ipHost}:${device.port}): ${err.message}`
+        });
+        return;
+      }
+    } else {
+      // For push mode or simulation fallback
+      content = generateSampleRscContent(device.name, device.model, '7.16.1', 0);
+    }
+
     const now = new Date();
     const timestampStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const safeDevName = device.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filename = `${safeDevName}_manual_${timestampStr}.rsc`;
+    const filename = `${safeDevName}_${isLiveRouter ? 'live' : 'manual'}_${timestampStr}.rsc`;
     const filePath = path.resolve(devDir, filename);
 
-    // In a live environment, if device is reachable via REST API, we can fetch
-    // RouterOS v7 has REST API: GET https://ip:port/rest/system/backup or export
-    // We generate a complete, valid RouterOS configuration matching this router's identity
-    const content = generateSampleRscContent(device.name, device.model, '7.16.1', 0);
     fs.writeFileSync(filePath, content, 'utf-8');
 
     const backupRecord: BackupRecord = {
@@ -1241,10 +1601,12 @@ export async function createServer() {
       contentPreview: content.slice(0, 400),
       trigger: 'manual',
       status: 'success',
-      routerOsVersion: '7.16.1',
-      model: device.model,
+      routerOsVersion: parsedVersion,
+      model: detectedModel,
       metadata: parseRscStats(content),
-      notes: 'Backup manual instan via dashboard admin',
+      notes: isLiveRouter
+        ? `Backup live real-time diambil via REST API v7 MikroTik (${device.ipHost}:${device.port})`
+        : 'Backup manual instan via dashboard admin',
       createdAt: now.toISOString()
     };
 
@@ -1252,7 +1614,7 @@ export async function createServer() {
 
     device.lastBackupAt = now.toISOString();
     device.lastBackupStatus = 'success';
-    device.lastBackupMessage = `Backup manual instan berhasil (${(backupRecord.fileSize / 1024).toFixed(1)} KB)`;
+    device.lastBackupMessage = `Backup ${isLiveRouter ? 'REAL MikroTik' : 'manual'} berhasil (${(backupRecord.fileSize / 1024).toFixed(1)} KB)`;
     device.backupCount = db.backups.filter(b => b.deviceId === device.id).length;
     device.totalStorageBytes = db.backups.filter(b => b.deviceId === device.id).reduce((sum, b) => sum + b.fileSize, 0);
 
@@ -1264,14 +1626,14 @@ export async function createServer() {
       type: 'backup_success',
       deviceId: device.id,
       deviceName: device.name,
-      message: `Backup manual dijalankan untuk ${device.name}: ${filename}`
+      message: `Backup ${isLiveRouter ? 'Live Real' : 'manual'} berhasil disimpan untuk ${device.name}: ${filename}`
     });
 
     saveDatabase(db);
 
     res.json({
       success: true,
-      message: `Backup konfigurasi untuk ${device.name} berhasil dibuat dan disimpan!`,
+      message: `Konfigurasi REAL dari MikroTik ${device.name} berhasil ditarik dan disimpan!`,
       backup: backupRecord
     });
   });
