@@ -113,3 +113,14 @@ export interface AppInfo {
   storageDirectory: string;
   time: string;
 }
+
+export interface AuthUser {
+  username: string;
+  lastLoginAt?: string;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  token: string;
+  user: AuthUser;
+}

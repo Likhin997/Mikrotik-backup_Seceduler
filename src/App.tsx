@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Server,
   Plus,
@@ -15,8 +15,8 @@ import {
   Clock,
   Sparkles
 } from 'lucide-react';
-import { RouterDevice, BackupRecord, SystemStats, ActivityLog } from './types';
-import { api } from './services/api';
+import { RouterDevice, BackupRecord, SystemStats, ActivityLog, AuthUser } from './types';
+import { api, setUnauthorizedHandler } from './services/api';
 import { Navbar } from './components/Navbar';
 import { StatsCards } from './components/StatsCards';
 import { DeviceCard } from './components/DeviceCard';
@@ -29,9 +29,18 @@ import { BackupTable } from './components/BackupTable';
 import { RestoreGuideModal } from './components/RestoreGuideModal';
 import { ActivityLogsView } from './components/ActivityLogsView';
 import { DockerModal } from './components/DockerModal';
+import { LoginPage } from './components/LoginPage';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { Toast, ToastMessage } from './components/Toast';
 
 export default function App() {
+  // Auth state
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState<string | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
+
   const [activeTab, setActiveTab] = useState<'devices' | 'backups' | 'logs' | 'guide'>('devices');
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [devices, setDevices] = useState<RouterDevice[]>([]);
@@ -79,6 +88,91 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  // Check auth session on startup
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        const lastActiveStr = localStorage.getItem('mikrotik_last_active');
+        if (lastActiveStr) {
+          const lastActiveTime = parseInt(lastActiveStr, 10);
+          if (Date.now() - lastActiveTime > 30 * 60 * 1000) {
+            await api.logout();
+            setCurrentUser(null);
+            setSessionExpiredMessage('Sesi Anda telah kedaluwarsa karena tidak ada aktivitas selama 30 menit. Silakan login kembali.');
+            setIsCheckingAuth(false);
+            return;
+          }
+        }
+
+        const res = await api.checkSession();
+        if (res.authenticated && res.user) {
+          setCurrentUser(res.user);
+          lastActivityRef.current = Date.now();
+          try {
+            localStorage.setItem('mikrotik_last_active', String(Date.now()));
+          } catch {}
+        }
+      } catch {
+        setCurrentUser(null);
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+
+    setUnauthorizedHandler(() => {
+      setCurrentUser(null);
+      setSessionExpiredMessage('Sesi Anda telah kedaluwarsa atau tidak valid. Silakan login kembali.');
+    });
+
+    initAuth();
+  }, []);
+
+  // 30-Minute Idle Inactivity Auto-Logout Tracker
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const MAX_IDLE_MS = 30 * 60 * 1000; // 30 minutes
+
+    const updateActivity = () => {
+      lastActivityRef.current = Date.now();
+      try {
+        localStorage.setItem('mikrotik_last_active', String(Date.now()));
+      } catch {}
+    };
+
+    const checkInactivity = async () => {
+      const idleTime = Date.now() - lastActivityRef.current;
+      if (idleTime > MAX_IDLE_MS) {
+        try {
+          await api.logout();
+        } catch {}
+        setCurrentUser(null);
+        setSessionExpiredMessage('Sesi Anda telah otomatis keluar karena tidak ada aktivitas selama 30 menit demi keamanan sistem.');
+      }
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkInactivity();
+      }
+    };
+
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click', 'wheel'];
+    events.forEach(evt => window.addEventListener(evt, updateActivity, { passive: true }));
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    // Check inactivity every 10 seconds
+    const interval = setInterval(checkInactivity, 10000);
+
+    return () => {
+      events.forEach(evt => window.removeEventListener(evt, updateActivity));
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      clearInterval(interval);
+    };
+  }, [currentUser]);
+
   // Load all data
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setIsRefreshing(true);
@@ -104,6 +198,7 @@ export default function App() {
   }, [showToast]);
 
   useEffect(() => {
+    if (!currentUser) return;
     loadData();
 
     // Auto refresh every 15 seconds to sync incoming automatic backups
@@ -112,7 +207,16 @@ export default function App() {
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [loadData]);
+  }, [currentUser, loadData]);
+
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+    } catch {}
+    setCurrentUser(null);
+    setSessionExpiredMessage(null);
+    showToast('Anda telah berhasil keluar dari sistem.', 'info');
+  };
 
   // Handle Save Device (Add / Edit)
   const handleSaveDevice = async (data: Partial<RouterDevice>) => {
@@ -176,6 +280,45 @@ export default function App() {
     setIsDiffModalOpen(true);
   };
 
+  // Loading state while checking active auth session
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-200">
+        <div className="relative mb-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-xl shadow-blue-500/20 animate-pulse">
+            <Server className="w-7 h-7" />
+          </div>
+          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center">
+            <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+          </div>
+        </div>
+        <p className="text-sm font-medium text-slate-300">Memverifikasi sesi keamanan...</p>
+        <p className="text-xs text-slate-500 mt-1">MikroTik Backup Manager</p>
+      </div>
+    );
+  }
+
+  // Not authenticated: Access denied to dashboard, render Login Page only
+  if (!currentUser) {
+    return (
+      <>
+        <LoginPage
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+            setSessionExpiredMessage(null);
+            lastActivityRef.current = Date.now();
+            try {
+              localStorage.setItem('mikrotik_last_active', String(Date.now()));
+            } catch {}
+            showToast(`Selamat datang kembali, ${user.username}!`, 'success');
+          }}
+          sessionExpiredMessage={sessionExpiredMessage}
+        />
+        <Toast toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Navigation */}
@@ -191,6 +334,9 @@ export default function App() {
         onRefresh={() => loadData(false)}
         isRefreshing={isRefreshing}
         totalBackups={backups.length}
+        currentUser={currentUser}
+        onOpenChangePassword={() => setIsChangePasswordOpen(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
@@ -485,6 +631,15 @@ export default function App() {
       <DockerModal
         isOpen={isDockerModalOpen}
         onClose={() => setIsDockerModalOpen(false)}
+      />
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+        onSuccess={(msg) => {
+          showToast(msg, 'success');
+        }}
       />
 
       {/* Delete Device Confirmation Dialog */}

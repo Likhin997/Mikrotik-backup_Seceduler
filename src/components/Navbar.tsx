@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Server,
   HardDrive,
@@ -9,8 +9,14 @@ import {
   HelpCircle,
   Activity,
   FileCode,
-  Box
+  Box,
+  User,
+  KeyRound,
+  LogOut,
+  ChevronDown,
+  ShieldCheck
 } from 'lucide-react';
+import { AuthUser } from '../types';
 
 interface NavbarProps {
   activeTab: 'devices' | 'backups' | 'logs' | 'guide';
@@ -21,6 +27,9 @@ interface NavbarProps {
   onRefresh: () => void;
   isRefreshing: boolean;
   totalBackups: number;
+  currentUser?: AuthUser | null;
+  onOpenChangePassword: () => void;
+  onLogout: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -31,8 +40,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenDocker,
   onRefresh,
   isRefreshing,
-  totalBackups
+  totalBackups,
+  currentUser,
+  onOpenChangePassword,
+  onLogout
 }) => {
+  const [showUserMenu, setShowUserMenu] = useState(false);
+
   return (
     <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -141,8 +155,70 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs sm:text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-lg transition-all shadow-md shadow-blue-500/20 active:scale-95"
             >
               <Plus className="w-4 h-4" />
-              <span>Tambah Router</span>
+              <span className="hidden sm:inline">Tambah Router</span>
+              <span className="sm:hidden">Tambah</span>
             </button>
+
+            {/* User Profile & Logout Dropdown */}
+            {currentUser && (
+              <div className="relative ml-1">
+                <button
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                  className="flex items-center space-x-1.5 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 transition-all text-xs"
+                >
+                  <div className="w-6 h-6 rounded-full bg-blue-600/30 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-[11px]">
+                    {currentUser.username.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="font-medium text-slate-200 hidden sm:inline">{currentUser.username}</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
+
+                {showUserMenu && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowUserMenu(false)}
+                    />
+                    <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl py-1.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3 py-2 border-b border-slate-800/80">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                          <p className="font-semibold text-white">{currentUser.username}</p>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5 flex items-center space-x-1">
+                          <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
+                          <span>Auto-Logout 30 Menit Idle</span>
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onOpenChangePassword();
+                        }}
+                        className="w-full text-left px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 flex items-center space-x-2 transition-colors cursor-pointer"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Ganti Password</span>
+                      </button>
+
+                      <div className="border-t border-slate-800/80 my-1" />
+
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onLogout();
+                        }}
+                        className="w-full text-left px-3 py-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 flex items-center space-x-2 transition-colors cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Keluar / Logout</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

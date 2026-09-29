@@ -85,21 +85,55 @@ export interface ActivityLog {
   message: string;
 }
 
+export interface AdminUser {
+  id: string;
+  username: string;
+  passwordHash: string;
+  passwordSalt: string;
+  lastLoginAt?: string;
+  updatedAt: string;
+}
+
 interface AppDatabase {
   devices: RouterDevice[];
   backups: BackupRecord[];
   logs: ActivityLog[];
+  admin: AdminUser;
+}
+
+export function hashPassword(password: string, salt: string): string {
+  return crypto.scryptSync(password, salt, 64).toString('hex');
 }
 
 // Initial database seeding if empty
 function loadDatabase(): AppDatabase {
+  let existingDb: AppDatabase | null = null;
   if (fs.existsSync(DB_FILE)) {
     try {
       const content = fs.readFileSync(DB_FILE, 'utf-8');
-      return JSON.parse(content);
+      existingDb = JSON.parse(content);
     } catch (err) {
       console.error('Error reading database.json, initializing fresh db:', err);
     }
+  }
+
+  const defaultSalt = crypto.randomBytes(16).toString('hex');
+  const defaultAdmin: AdminUser = {
+    id: 'admin_likhin',
+    username: 'likhin',
+    passwordSalt: defaultSalt,
+    passwordHash: hashPassword('11013009', defaultSalt),
+    updatedAt: new Date().toISOString()
+  };
+
+  if (existingDb) {
+    if (!existingDb.admin) {
+      existingDb.admin = defaultAdmin;
+      try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(existingDb, null, 2), 'utf-8');
+      } catch (e) {}
+    }
+    return existingDb;
   }
 
   // Initial seed with sample realistic MikroTik devices
@@ -180,7 +214,8 @@ function loadDatabase(): AppDatabase {
         type: 'device_added',
         message: 'Sistem backup otomatis MikroTik dimulai'
       }
-    ]
+    ],
+    admin: defaultAdmin
   };
 
   saveDatabase(db);
@@ -484,6 +519,19 @@ export async function createServer() {
   app.use(express.text({ limit: '50mb', type: ['text/plain', 'text/*', 'application/x-www-form-urlencoded'] }));
   app.use(express.raw({ limit: '50mb', type: ['application/octet-stream', 'application/x-routeros'] }));
 
+  // Security Headers & Cache-Control Hardening
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    if (req.path.startsWith('/api/')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      res.setHeader('Pragma', 'no-cache');
+    }
+    next();
+  });
+
   // Helper to get base URL
   const getAppBaseUrl = (req: Request) => {
     if (process.env.APP_URL) {
@@ -494,10 +542,253 @@ export async function createServer() {
     return `${protocol}://${host}`;
   };
 
+  // --- SESSION & BRUTE-FORCE SECURITY MANAGEMENT ---
+  interface AdminSession {
+    token: string;
+    userId: string;
+    username: string;
+    createdAt: number;
+    lastActiveAt: number;
+  }
+
+  // 30 minutes idle inactivity auto-logout
+  const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+  const activeSessions = new Map<string, AdminSession>();
+
+  // Periodically purge expired idle sessions every 60 seconds
+  setInterval(() => {
+    const now = Date.now();
+    for (const [tok, sess] of activeSessions.entries()) {
+      if (now - sess.lastActiveAt > SESSION_TIMEOUT_MS) {
+        activeSessions.delete(tok);
+      }
+    }
+  }, 60000);
+
+  // Brute-force protection: IP or username tracking
+  interface FailedAttempt {
+    count: number;
+    lockedUntil?: number;
+  }
+  const failedAttempts = new Map<string, FailedAttempt>();
+
+  const recordFailedAttempt = (key: string): number => {
+    const attempt = failedAttempts.get(key) || { count: 0 };
+    attempt.count += 1;
+    if (attempt.count >= 5) {
+      attempt.lockedUntil = Date.now() + 15 * 60 * 1000; // Lock for 15 minutes after 5 failed attempts
+    }
+    failedAttempts.set(key, attempt);
+    return attempt.count;
+  };
+
+  // Auth Middleware for protected admin API routes
+  const requireAuth = (req: Request, res: Response, next: () => void) => {
+    // Check Authorization header or query param (for file download)
+    let token = '';
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    } else if (req.query.authToken && typeof req.query.authToken === 'string') {
+      token = req.query.authToken.trim();
+    }
+
+    if (!token) {
+      res.status(401).json({ error: 'Akses ditolak: Token autentikasi tidak ditemukan. Silakan login terlebih dahulu.' });
+      return;
+    }
+
+    const session = activeSessions.get(token);
+    if (!session) {
+      res.status(401).json({ error: 'Sesi tidak valid atau telah berakhir. Silakan login kembali.' });
+      return;
+    }
+
+    const now = Date.now();
+    if (now - session.lastActiveAt > SESSION_TIMEOUT_MS) {
+      activeSessions.delete(token);
+      res.status(401).json({ error: 'Sesi telah kedaluwarsa karena tidak ada aktivitas selama 30 menit. Silakan login kembali.' });
+      return;
+    }
+
+    // Sliding idle window: extend last active time on every request
+    session.lastActiveAt = now;
+    (req as any).user = session;
+    next();
+  };
+
+  // Helper for safe constant-time hash comparison
+  const safeCompareHashes = (a: string, b: string): boolean => {
+    try {
+      const bufA = Buffer.from(a, 'hex');
+      const bufB = Buffer.from(b, 'hex');
+      if (bufA.length !== bufB.length) return false;
+      return crypto.timingSafeEqual(bufA, bufB);
+    } catch {
+      return false;
+    }
+  };
+
+  // --- AUTHENTICATION ROUTES ---
+
+  // 0a. Login Route (likhin / 11013009)
+  app.post('/api/auth/login', async (req: Request, res: Response) => {
+    const { username, password } = req.body || {};
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || req.socket.remoteAddress || 'unknown';
+    const lockKey = `${clientIp}_${String(username || '').toLowerCase()}`;
+
+    const attempt = failedAttempts.get(lockKey);
+    const now = Date.now();
+    if (attempt && attempt.lockedUntil && attempt.lockedUntil > now) {
+      const remainingSec = Math.ceil((attempt.lockedUntil - now) / 1000);
+      res.status(429).json({
+        error: `Terlalu banyak percobaan login gagal. Demi keamanan, akun terkunci sementara. Coba lagi dalam ${remainingSec} detik.`
+      });
+      return;
+    }
+
+    if (!username || !password) {
+      res.status(400).json({ error: 'Username dan password wajib diisi.' });
+      return;
+    }
+
+    const admin = db.admin;
+    if (!admin || admin.username.toLowerCase() !== String(username).trim().toLowerCase()) {
+      // Small delay to mitigate fast brute-force enumeration
+      await new Promise(r => setTimeout(r, 400));
+      recordFailedAttempt(lockKey);
+      res.status(401).json({ error: 'Username atau password salah.' });
+      return;
+    }
+
+    const computedHash = hashPassword(String(password), admin.passwordSalt);
+    const isPasswordCorrect = safeCompareHashes(computedHash, admin.passwordHash);
+
+    if (!isPasswordCorrect) {
+      // Small delay to mitigate fast brute-force enumeration
+      await new Promise(r => setTimeout(r, 400));
+      const count = recordFailedAttempt(lockKey);
+      const remaining = Math.max(0, 5 - count);
+      res.status(401).json({
+        error: `Username atau password salah.${remaining > 0 ? ` Sisa percobaan: ${remaining} kali.` : ' Akun terkunci selama 15 menit.'}`
+      });
+      return;
+    }
+
+    // Reset failed counter upon successful login
+    failedAttempts.delete(lockKey);
+
+    // Generate 256-bit cryptographically secure session token
+    const token = crypto.randomBytes(32).toString('hex');
+    const session: AdminSession = {
+      token,
+      userId: admin.id,
+      username: admin.username,
+      createdAt: now,
+      lastActiveAt: now
+    };
+    activeSessions.set(token, session);
+
+    admin.lastLoginAt = new Date().toISOString();
+    saveDatabase(db);
+
+    db.logs.unshift({
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: 'backup_success',
+      message: `Admin '${admin.username}' berhasil login (IP: ${clientIp})`
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        username: admin.username,
+        lastLoginAt: admin.lastLoginAt
+      }
+    });
+  });
+
+  // 0b. Current Session Check
+  app.get('/api/auth/me', requireAuth, (req: Request, res: Response) => {
+    const session = (req as any).user as AdminSession;
+    res.json({
+      authenticated: true,
+      user: {
+        username: session.username,
+        lastActiveAt: new Date(session.lastActiveAt).toISOString()
+      }
+    });
+  });
+
+  // 0c. Logout Route
+  app.post('/api/auth/logout', (req: Request, res: Response) => {
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.slice(7).trim();
+      activeSessions.delete(token);
+    }
+    res.json({ success: true, message: 'Berhasil logout' });
+  });
+
+  // 0d. Change Password Route
+  app.post('/api/auth/change-password', requireAuth, (req: Request, res: Response) => {
+    const { oldPassword, newPassword } = req.body || {};
+    if (!oldPassword || !newPassword) {
+      res.status(400).json({ error: 'Password lama dan password baru wajib diisi.' });
+      return;
+    }
+
+    if (String(newPassword).length < 8) {
+      res.status(400).json({ error: 'Password baru minimal harus 8 karakter.' });
+      return;
+    }
+
+    const admin = db.admin;
+    const currentHash = hashPassword(String(oldPassword), admin.passwordSalt);
+    const isOldCorrect = safeCompareHashes(currentHash, admin.passwordHash);
+
+    if (!isOldCorrect) {
+      res.status(400).json({ error: 'Password lama yang Anda masukkan salah.' });
+      return;
+    }
+
+    if (oldPassword === newPassword) {
+      res.status(400).json({ error: 'Password baru tidak boleh sama dengan password lama.' });
+      return;
+    }
+
+    // Generate new salt and scrypt hash
+    const newSalt = crypto.randomBytes(16).toString('hex');
+    const newHash = hashPassword(String(newPassword), newSalt);
+
+    admin.passwordSalt = newSalt;
+    admin.passwordHash = newHash;
+    admin.updatedAt = new Date().toISOString();
+    saveDatabase(db);
+
+    // Invalidate other active sessions to ensure previous tokens are revoked
+    const currentToken = req.headers['authorization']?.slice(7).trim();
+    for (const [tok] of activeSessions.entries()) {
+      if (tok !== currentToken) {
+        activeSessions.delete(tok);
+      }
+    }
+
+    db.logs.unshift({
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: 'device_updated',
+      message: `Password akun admin '${admin.username}' berhasil diubah`
+    });
+
+    res.json({ success: true, message: 'Password berhasil diubah dengan aman!' });
+  });
+
   // --- API ROUTES ---
 
   // 1. System Stats & Overview
-  app.get('/api/stats', (req: Request, res: Response) => {
+  app.get('/api/stats', requireAuth, (req: Request, res: Response) => {
     const totalDevices = db.devices.length;
     const activeDevices = db.devices.filter(d => d.enabled).length;
     const totalBackups = db.backups.length;
@@ -523,7 +814,7 @@ export async function createServer() {
   });
 
   // 2. Devices CRUD
-  app.get('/api/devices', (req: Request, res: Response) => {
+  app.get('/api/devices', requireAuth, (req: Request, res: Response) => {
     // Recalculate backup counts and sizes for consistency
     db.devices.forEach(device => {
       const devBackups = db.backups.filter(b => b.deviceId === device.id);
@@ -533,7 +824,7 @@ export async function createServer() {
     res.json(db.devices);
   });
 
-  app.get('/api/devices/:id', (req: Request, res: Response) => {
+  app.get('/api/devices/:id', requireAuth, (req: Request, res: Response) => {
     const device = db.devices.find(d => d.id === req.params.id);
     if (!device) {
       res.status(404).json({ error: 'Device not found' });
@@ -546,7 +837,7 @@ export async function createServer() {
     });
   });
 
-  app.post('/api/devices', (req: Request, res: Response) => {
+  app.post('/api/devices', requireAuth, (req: Request, res: Response) => {
     const {
       name,
       model,
@@ -603,7 +894,7 @@ export async function createServer() {
     res.status(201).json(newDevice);
   });
 
-  app.put('/api/devices/:id', (req: Request, res: Response) => {
+  app.put('/api/devices/:id', requireAuth, (req: Request, res: Response) => {
     const deviceIndex = db.devices.findIndex(d => d.id === req.params.id);
     if (deviceIndex === -1) {
       res.status(404).json({ error: 'Device not found' });
@@ -645,7 +936,7 @@ export async function createServer() {
     res.json(updated);
   });
 
-  app.post('/api/devices/:id/token', (req: Request, res: Response) => {
+  app.post('/api/devices/:id/token', requireAuth, (req: Request, res: Response) => {
     const device = db.devices.find(d => d.id === req.params.id);
     if (!device) {
       res.status(404).json({ error: 'Device not found' });
@@ -658,7 +949,7 @@ export async function createServer() {
     res.json({ webhookToken: device.webhookToken });
   });
 
-  app.delete('/api/devices/:id', (req: Request, res: Response) => {
+  app.delete('/api/devices/:id', requireAuth, (req: Request, res: Response) => {
     const deviceIndex = db.devices.findIndex(d => d.id === req.params.id);
     if (deviceIndex === -1) {
       res.status(404).json({ error: 'Device not found' });
@@ -695,7 +986,7 @@ export async function createServer() {
   });
 
   // 3. RouterOS Script Generator for MikroTik terminal
-  app.get('/api/devices/:id/script', (req: Request, res: Response) => {
+  app.get('/api/devices/:id/script', requireAuth, (req: Request, res: Response) => {
     const device = db.devices.find(d => d.id === req.params.id);
     if (!device) {
       res.status(404).json({ error: 'Device not found' });
@@ -782,7 +1073,7 @@ export async function createServer() {
   });
 
   // 4. Backups List & Filtering
-  app.get('/api/backups', (req: Request, res: Response) => {
+  app.get('/api/backups', requireAuth, (req: Request, res: Response) => {
     const { deviceId, search, type } = req.query;
     let results = [...db.backups];
 
@@ -811,7 +1102,7 @@ export async function createServer() {
   });
 
   // 5. Get Backup Detail & Raw Text Content
-  app.get('/api/backups/:id', (req: Request, res: Response) => {
+  app.get('/api/backups/:id', requireAuth, (req: Request, res: Response) => {
     const backup = db.backups.find(b => b.id === req.params.id);
     if (!backup) {
       res.status(404).json({ error: 'Backup not found' });
@@ -843,7 +1134,7 @@ export async function createServer() {
   });
 
   // 6. Download Backup File
-  app.get('/api/backups/:id/download', (req: Request, res: Response) => {
+  app.get('/api/backups/:id/download', requireAuth, (req: Request, res: Response) => {
     const backup = db.backups.find(b => b.id === req.params.id);
     if (!backup) {
       res.status(404).json({ error: 'Backup record not found' });
@@ -864,7 +1155,7 @@ export async function createServer() {
   });
 
   // 7. Compare / Diff two backups of the same device
-  app.get('/api/backups/:id/diff/:compareId', (req: Request, res: Response) => {
+  app.get('/api/backups/:id/diff/:compareId', requireAuth, (req: Request, res: Response) => {
     const backup1 = db.backups.find(b => b.id === req.params.id);
     const backup2 = db.backups.find(b => b.id === req.params.compareId);
 
@@ -1947,7 +2238,7 @@ function filterStaticOnlyRsc(content: string): string {
   }
 
   // 9. Manual Trigger "Backup Now" / Pull from Real MikroTik
-  app.post('/api/devices/:id/backup-now', async (req: Request, res: Response) => {
+  app.post('/api/devices/:id/backup-now', requireAuth, async (req: Request, res: Response) => {
     const device = db.devices.find(d => d.id === req.params.id);
     if (!device) {
       res.status(404).json({ error: 'Device not found' });
@@ -2046,7 +2337,7 @@ function filterStaticOnlyRsc(content: string): string {
   });
 
   // 10. Delete a Backup Record
-  app.delete('/api/backups/:id', (req: Request, res: Response) => {
+  app.delete('/api/backups/:id', requireAuth, (req: Request, res: Response) => {
     const backupIndex = db.backups.findIndex(b => b.id === req.params.id);
     if (backupIndex === -1) {
       res.status(404).json({ error: 'Backup not found' });
@@ -2076,7 +2367,7 @@ function filterStaticOnlyRsc(content: string): string {
   });
 
   // 11. Activity Logs
-  app.get('/api/logs', (req: Request, res: Response) => {
+  app.get('/api/logs', requireAuth, (req: Request, res: Response) => {
     res.json(db.logs.slice(0, 50));
   });
 
