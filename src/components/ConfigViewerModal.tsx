@@ -137,27 +137,27 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/35 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/70 shrink-0">
+        <div className="px-6 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/90 shrink-0">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center shadow-xs">
               <FileCode className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h3 className="font-semibold text-white text-base tracking-tight truncate max-w-md">
+                <h3 className="font-bold text-slate-900 text-base tracking-tight truncate max-w-md">
                   {backup.filename}
                 </h3>
-                <span className="px-2 py-0.5 rounded text-[11px] font-semibold uppercase bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                <span className="px-2 py-0.5 rounded text-[11px] font-semibold uppercase bg-blue-50 text-blue-700 border border-blue-200">
                   {backup.fileType.toUpperCase()}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 flex items-center space-x-3 mt-0.5">
-                <span>Router: <strong className="text-slate-200">{backup.deviceName}</strong> ({backup.deviceIp})</span>
+              <p className="text-xs text-slate-500 flex items-center space-x-3 mt-0.5">
+                <span>Router: <strong className="text-slate-700">{backup.deviceName}</strong> ({backup.deviceIp})</span>
                 <span>&bull;</span>
-                <span>Ukuran: <strong className="text-slate-200">{formatBytes(backup.fileSize)}</strong></span>
+                <span>Ukuran: <strong className="text-slate-700">{formatBytes(backup.fileSize)}</strong></span>
                 <span>&bull;</span>
                 <span>Waktu: {formatDate(backup.createdAt)}</span>
               </p>
@@ -168,7 +168,7 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
             {onCompareWithAnother && backup.fileType === 'rsc' && (
               <button
                 onClick={() => onCompareWithAnother(backup)}
-                className="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                className="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 transition-colors cursor-pointer"
               >
                 <Layers className="w-3.5 h-3.5" />
                 <span>Bandingkan Perubahan (Diff)</span>
@@ -177,16 +177,16 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
 
             <button
               onClick={handleCopy}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors"
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 transition-colors shadow-2xs cursor-pointer"
             >
               {copied ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Tersalin!</span>
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="text-emerald-700 font-semibold">Tersalin!</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5" />
+                  <Copy className="w-3.5 h-3.5 text-slate-500" />
                   <span>Salin Semua</span>
                 </>
               )}
@@ -194,7 +194,7 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
 
             <button
               onClick={handleDownload}
-              className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors shadow-sm"
+              className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-xs cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Unduh File</span>
@@ -202,7 +202,7 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
 
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -210,7 +210,7 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
         </div>
 
         {/* Toolbar: Search & Section shortcuts */}
-        <div className="px-6 py-2.5 bg-slate-950/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="px-6 py-2.5 bg-slate-100/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
           {/* Search inside script */}
           <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -219,12 +219,12 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Cari IP, interface, firewall, VLAN..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 shadow-2xs"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
               >
                 &times;
               </button>
@@ -236,27 +236,27 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
             {/* Static / Dynamic Toggle Button */}
             <button
               onClick={() => setStaticOnly(!staticOnly)}
-              className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border shrink-0 ${
+              className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border shrink-0 cursor-pointer ${
                 staticOnly
-                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 shadow-xs'
-                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs font-semibold'
+                  : 'bg-white text-slate-600 border-slate-300 hover:text-slate-900'
               }`}
               title={staticOnly ? 'Mode saat ini: Hanya statis. Klik untuk menampilkan semua (termasuk dinamis)' : 'Mode saat ini: Menampilkan semua. Klik untuk menyaring yang dinamis'}
             >
-              <Check className={`w-3 h-3 ${staticOnly ? 'text-emerald-400' : 'opacity-30'}`} />
+              <Check className={`w-3 h-3 ${staticOnly ? 'text-emerald-600' : 'opacity-30'}`} />
               <span>{staticOnly ? 'Hanya Statis' : 'Semua (Termasuk Dinamis)'}</span>
             </button>
 
-            <span className="text-slate-600 text-[11px] px-1 hidden lg:inline">|</span>
-            <span className="text-slate-500 text-[11px] mr-1 hidden lg:inline">Seksi:</span>
+            <span className="text-slate-300 text-[11px] px-1 hidden lg:inline">|</span>
+            <span className="text-slate-500 text-[11px] mr-1 hidden lg:inline font-medium">Seksi:</span>
             {sections.slice(0, 6).map(sec => (
               <button
                 key={sec.prefix}
                 onClick={() => setActiveSection(sec.prefix)}
-                className={`px-2.5 py-1 rounded-md text-[11px] whitespace-nowrap transition-colors ${
+                className={`px-2.5 py-1 rounded-md text-[11px] whitespace-nowrap transition-colors cursor-pointer ${
                   activeSection === sec.prefix
-                    ? 'bg-blue-600 text-white font-medium'
-                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                    ? 'bg-blue-600 text-white font-semibold shadow-2xs'
+                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
                 }`}
               >
                 {sec.name}
@@ -266,9 +266,9 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
         </div>
 
         {/* Code View Area */}
-        <div className="flex-1 overflow-auto bg-slate-950 font-mono text-xs p-4 leading-relaxed selection:bg-blue-900 selection:text-white">
+        <div className="flex-1 overflow-auto bg-slate-50 font-mono text-xs p-4 leading-relaxed selection:bg-blue-100 selection:text-blue-900">
           {loading ? (
-            <div className="h-full flex items-center justify-center text-slate-400">
+            <div className="h-full flex items-center justify-center text-slate-500">
               Memuat konfigurasi...
             </div>
           ) : filteredLines.length === 0 ? (
@@ -283,14 +283,14 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
                   const isCommand = text.trim().startsWith('/');
                   const isAddOrSet = text.trim().startsWith('add') || text.trim().startsWith('set');
 
-                  let textStyle = 'text-slate-300';
-                  if (isComment) textStyle = 'text-emerald-500/90 italic';
-                  else if (isCommand) textStyle = 'text-cyan-400 font-semibold';
-                  else if (isAddOrSet) textStyle = 'text-blue-300';
+                  let textStyle = 'text-slate-800';
+                  if (isComment) textStyle = 'text-emerald-700 italic font-medium';
+                  else if (isCommand) textStyle = 'text-blue-700 font-bold';
+                  else if (isAddOrSet) textStyle = 'text-indigo-800 font-medium';
 
                   return (
-                    <tr key={lineNum} className="hover:bg-slate-900/60 transition-colors">
-                      <td className="w-12 pr-4 text-right select-none text-slate-600 font-mono text-[11px] align-top">
+                    <tr key={lineNum} className="hover:bg-slate-100/90 transition-colors">
+                      <td className="w-12 pr-4 text-right select-none text-slate-400 font-mono text-[11px] align-top">
                         {lineNum}
                       </td>
                       <td className={`whitespace-pre-wrap break-all ${textStyle}`}>
@@ -305,14 +305,14 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
         </div>
 
         {/* Footer Bar */}
-        <div className="px-6 py-2.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0">
+        <div className="px-6 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600 shrink-0">
           <span>
-            Menampilkan {filteredLines.length} dari {lines.length} baris konfigurasi
+            Menampilkan <strong className="text-slate-800">{filteredLines.length}</strong> dari {lines.length} baris konfigurasi
           </span>
           <div className="flex items-center space-x-2">
             <button
               onClick={handleDownload}
-              className="text-blue-400 hover:text-blue-300 font-medium hover:underline flex items-center space-x-1"
+              className="text-blue-600 hover:text-blue-700 font-semibold hover:underline flex items-center space-x-1 cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Simpan ke Komputer (.rsc)</span>

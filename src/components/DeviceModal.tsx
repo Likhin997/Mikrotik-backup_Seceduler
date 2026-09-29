@@ -71,56 +71,57 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       return;
     }
     if (!ipHost.trim()) {
-      setError('IP Address / Host wajib diisi');
+      setError('IP address atau Host wajib diisi');
       return;
     }
 
     setLoading(true);
     setError(null);
+
     try {
       await onSave({
         name: name.trim(),
-        model: model.trim() || 'MikroTik RouterOS',
+        model: model.trim() || undefined,
         ipHost: ipHost.trim(),
-        port: Number(port),
+        port: Number(port) || 443,
         protocol,
-        username: protocol === 'rest_api' ? username.trim() : undefined,
-        password: protocol === 'rest_api' && password ? password : undefined,
+        username: username.trim() || 'admin',
+        password: password || undefined,
         useTls,
         scheduleFrequency,
         scheduleTime,
-        retentionCount: Number(retentionCount),
+        retentionCount: Number(retentionCount) || 15,
         enabled
       });
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Terjadi kesalahan saat menyimpan router');
+      setError(err.message || 'Gagal menyimpan pengaturan router');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
           <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center">
               <Server className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-semibold text-white text-base">
+              <h3 className="font-bold text-slate-900 text-base">
                 {initialDevice ? 'Ubah Pengaturan Router' : 'Tambah Router MikroTik Baru'}
               </h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 Konfigurasi penjadwalan dan integrasi backup otomatis
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+            className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -129,8 +130,8 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && (
-            <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
               <span>{error}</span>
             </div>
           )}
@@ -138,8 +139,8 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
           {/* Router Name & Model */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Nama Router / Identitas <span className="text-rose-400">*</span>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Nama Router / Identitas <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
@@ -147,11 +148,11 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                 onChange={e => setName(e.target.value)}
                 placeholder="misal: RB4011-Core-Gateway"
                 required
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Model Hardware / Versi
               </label>
               <input
@@ -159,7 +160,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                 value={model}
                 onChange={e => setModel(e.target.value)}
                 placeholder="misal: RB4011 / CCR2004 / CHR"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
               />
             </div>
           </div>
@@ -167,8 +168,8 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
           {/* IP / Host & Port */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-2">
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                IP Address / Hostname <span className="text-rose-400">*</span>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                IP Address / Hostname <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
@@ -176,14 +177,14 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                 onChange={e => setIpHost(e.target.value)}
                 placeholder="192.168.88.1 atau vpn.kantor.com"
                 required
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 font-mono placeholder-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
+              <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
                 <span>Port</span>
-                <span className="text-[10px] text-slate-400 font-normal">
-                  {protocol === 'rest_api' ? 'Port REST/SSL' : 'Web/Winbox'}
+                <span className="text-[10px] text-slate-500 font-normal">
+                  {protocol === 'rest_api' ? 'REST/SSL' : 'Web/Winbox'}
                 </span>
               </label>
               <input
@@ -193,53 +194,50 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                 min="1"
                 max="65535"
                 placeholder="443"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 font-mono placeholder-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
               />
-              <p className="text-[10px] text-slate-400 mt-1 leading-tight">
-                {protocol === 'rest_api' ? 'Port HTTPS www-ssl (443) atau www (80) MikroTik' : 'Port akses router (443 / 80 / 8291)'}
-              </p>
             </div>
           </div>
 
           {/* Backup Mode / Protocol */}
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
               <span>Metode Backup</span>
-              <span className="text-[11px] text-blue-400">Rekomendasi: Webhook Push</span>
+              <span className="text-[11px] text-blue-600 font-bold">Rekomendasi: Webhook Push</span>
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setProtocol('push_webhook')}
-                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
                   protocol === 'push_webhook'
-                    ? 'border-blue-500 bg-blue-500/10 text-white'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
+                    ? 'border-blue-500 bg-blue-50/60 text-slate-900 shadow-xs'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-xs text-white">Webhook Push (Otomatis)</span>
-                  {protocol === 'push_webhook' && <Check className="w-4 h-4 text-blue-400" />}
+                  <span className="font-bold text-xs text-slate-900">Webhook Push (Otomatis)</span>
+                  {protocol === 'push_webhook' && <Check className="w-4 h-4 text-blue-600" />}
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  RouterOS mengekspor & mengirim backup via <code className="text-cyan-300">/tool fetch</code>. Bekerja meski router di balik NAT/CGNAT/PPPoE.
+                <p className="text-[11px] text-slate-500 mt-1">
+                  RouterOS mengekspor &amp; mengirim backup via <code className="text-blue-700 font-semibold">/tool fetch</code>. Bekerja meski router di balik NAT/CGNAT/PPPoE.
                 </p>
               </button>
 
               <button
                 type="button"
                 onClick={() => setProtocol('rest_api')}
-                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
                   protocol === 'rest_api'
-                    ? 'border-blue-500 bg-blue-500/10 text-white'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
+                    ? 'border-blue-500 bg-blue-50/60 text-slate-900 shadow-xs'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-xs text-white">REST API v7 (Pull)</span>
-                  {protocol === 'rest_api' && <Check className="w-4 h-4 text-blue-400" />}
+                  <span className="font-bold text-xs text-slate-900">REST API v7 (Pull)</span>
+                  {protocol === 'rest_api' && <Check className="w-4 h-4 text-blue-600" />}
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1">
+                <p className="text-[11px] text-slate-500 mt-1">
                   Aplikasi menarik langsung konfigurasi dari router via REST API MikroTik RouterOS v7.1+.
                 </p>
               </button>
@@ -248,21 +246,21 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
 
           {/* REST API Credentials (if selected) */}
           {protocol === 'rest_api' && (
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-              <p className="text-xs text-slate-300 font-medium">Kredensial Login REST API RouterOS:</p>
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+              <p className="text-xs text-slate-800 font-bold">Kredensial Login REST API RouterOS:</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Username RouterOS</label>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Username RouterOS</label>
                   <input
                     type="text"
                     value={username}
                     onChange={e => setUsername(e.target.value)}
                     placeholder="admin"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white"
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                     Password {initialDevice ? '(Kosongkan jika tak berubah)' : ''}
                   </label>
                   <input
@@ -270,7 +268,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white"
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                 </div>
               </div>
@@ -280,13 +278,13 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
           {/* Schedule Frequency & Time */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Frekuensi Jadwal Backup
               </label>
               <select
                 value={scheduleFrequency}
                 onChange={e => setScheduleFrequency(e.target.value as any)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-blue-600 cursor-pointer"
               >
                 <option value="hourly">Tiap 1 Jam</option>
                 <option value="6hours">Tiap 6 Jam</option>
@@ -298,26 +296,26 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
 
             {scheduleFrequency === 'daily' && (
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Jam Eksekusi Harian
                 </label>
                 <input
                   type="time"
                   value={scheduleTime}
                   onChange={e => setScheduleTime(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-blue-600"
                 />
               </div>
             )}
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Batas Retensi File (Pruning)
               </label>
               <select
                 value={retentionCount}
                 onChange={e => setRetentionCount(Number(e.target.value))}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-blue-600 cursor-pointer"
               >
                 <option value="7">Simpan 7 backup terakhir</option>
                 <option value="15">Simpan 15 backup terakhir (Default)</option>
@@ -332,32 +330,32 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
           </div>
 
           {/* Enabled Toggle */}
-          <div className="flex items-center space-x-2 pt-2">
+          <div className="flex items-center space-x-2 pt-1">
             <input
               type="checkbox"
               id="deviceEnabled"
               checked={enabled}
               onChange={e => setEnabled(e.target.checked)}
-              className="w-4 h-4 rounded text-blue-600 bg-slate-950 border-slate-800 focus:ring-blue-500"
+              className="w-4 h-4 rounded text-blue-600 bg-white border-slate-300 focus:ring-blue-500 cursor-pointer"
             />
-            <label htmlFor="deviceEnabled" className="text-xs text-slate-300 cursor-pointer font-medium">
+            <label htmlFor="deviceEnabled" className="text-xs text-slate-700 cursor-pointer font-semibold">
               Aktifkan otomatisasi backup untuk router ini
             </label>
           </div>
 
           {/* Footer Action Buttons */}
-          <div className="pt-4 border-t border-slate-800 flex items-center justify-end space-x-2">
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-all shadow-md shadow-blue-500/20 disabled:opacity-50"
+              className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all shadow-xs disabled:opacity-50 cursor-pointer"
             >
               {loading ? 'Menyimpan...' : initialDevice ? 'Simpan Perubahan' : 'Tambah Router'}
             </button>

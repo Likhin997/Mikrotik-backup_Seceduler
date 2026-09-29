@@ -32,6 +32,7 @@ import { DockerModal } from './components/DockerModal';
 import { LoginPage } from './components/LoginPage';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { Toast, ToastMessage } from './components/Toast';
+import { JetCyberLogo } from './components/JetCyberLogo';
 
 export default function App() {
   // Auth state
@@ -283,17 +284,16 @@ export default function App() {
   // Loading state while checking active auth session
   if (isCheckingAuth) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-200">
-        <div className="relative mb-4">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-xl shadow-blue-500/20 animate-pulse">
-            <Server className="w-7 h-7" />
-          </div>
-          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center">
-            <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-800">
+        <div className="relative mb-3">
+          <JetCyberLogo variant="icon" size={72} theme="light" className="animate-pulse" />
+          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-white border border-slate-200 shadow-xs flex items-center justify-center">
+            <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
           </div>
         </div>
-        <p className="text-sm font-medium text-slate-300">Memverifikasi sesi keamanan...</p>
-        <p className="text-xs text-slate-500 mt-1">MikroTik Backup Manager</p>
+        <p className="text-base font-bold text-slate-900 tracking-wide">JET CYBER NETWORK</p>
+        <p className="text-[10px] text-slate-500 tracking-[0.25em] uppercase font-bold mt-0.5">REACH WITHOUT LIMITS</p>
+        <p className="text-xs text-blue-600 mt-3 font-mono font-medium">Memverifikasi sesi keamanan...</p>
       </div>
     );
   }
@@ -320,7 +320,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen bg-slate-100 text-slate-900 font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Navigation */}
       <Navbar
         activeTab={activeTab}
@@ -351,15 +351,15 @@ export default function App() {
         {activeTab === 'devices' && (
           <div className="space-y-6">
             {/* Header toolbar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
               <div>
-                <h2 className="text-base font-semibold text-white flex items-center space-x-2">
+                <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
                   <span>Daftar Router MikroTik</span>
-                  <span className="px-2 py-0.5 rounded text-xs font-normal bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
                     {devices.length} Perangkat
                   </span>
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-500 mt-0.5">
                   Kelola jadwal otomatisasi, pantau status koneksi, dan ambil skrip integrasi RouterOS
                 </p>
               </div>
@@ -367,9 +367,9 @@ export default function App() {
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setIsRestoreGuideOpen(true)}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-xs"
                 >
-                  <HelpCircle className="w-3.5 h-3.5 text-blue-400" />
+                  <HelpCircle className="w-3.5 h-3.5 text-blue-600" />
                   <span>Panduan Restore</span>
                 </button>
 
@@ -378,7 +378,7 @@ export default function App() {
                     setEditingDevice(null);
                     setIsDeviceModalOpen(true);
                   }}
-                  className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-all shadow-md shadow-blue-500/20 active:scale-95"
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all shadow-xs active:scale-95 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Tambah Router</span>
@@ -388,10 +388,10 @@ export default function App() {
 
             {/* Router Cards Grid */}
             {devices.length === 0 ? (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
-                <Server className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h3 className="text-base font-semibold text-white">Belum Ada Router MikroTik</h3>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1 mb-4">
+              <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center shadow-xs">
+                <Server className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <h3 className="text-base font-bold text-slate-800">Belum Ada Router MikroTik</h3>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
                   Tambahkan router MikroTik Anda untuk mulai menjadwalkan backup konfigurasi otomatis (.rsc dan .backup) secara terpusat.
                 </p>
                 <button
@@ -399,7 +399,7 @@ export default function App() {
                     setEditingDevice(null);
                     setIsDeviceModalOpen(true);
                   }}
-                  className="inline-flex items-center space-x-2 px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-all shadow-md"
+                  className="inline-flex items-center space-x-2 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all shadow-xs cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Tambah Router Sekarang</span>
@@ -432,24 +432,24 @@ export default function App() {
             )}
 
             {/* Quick MikroTik Webhook Workflow Banner */}
-            <div className="bg-gradient-to-r from-blue-950/40 via-slate-900 to-cyan-950/40 border border-blue-900/40 rounded-xl p-5 shadow-sm">
+            <div className="bg-gradient-to-r from-blue-50/80 via-white to-cyan-50/80 border border-blue-200 rounded-xl p-5 shadow-xs">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-start space-x-3">
-                  <div className="p-2.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                  <div className="p-2.5 rounded-lg bg-blue-100 text-blue-700 border border-blue-200 shrink-0">
                     <Terminal className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-semibold text-white">
+                    <h3 className="text-sm font-bold text-slate-900">
                       Bagaimana Otomatisasi Backup MikroTik Bekerja?
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
                       Router Anda akan mengekspor konfigurasi secara otomatis pada jadwal yang Anda pilih (misal harian jam 02:00) menggunakan skrip RouterOS bawaan. File konfigurasi dikirim secara aman langsung ke aplikasi ini dan tersimpan rapi untuk diunduh atau dibandingkan kapan saja.
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => setIsRestoreGuideOpen(true)}
-                  className="px-3.5 py-1.5 text-xs font-medium text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-800/60 rounded-lg transition-colors whitespace-nowrap self-end sm:self-center"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg transition-colors whitespace-nowrap self-end sm:self-center cursor-pointer shadow-xs"
                 >
                   Pelajari Selengkapnya &rarr;
                 </button>
@@ -463,18 +463,18 @@ export default function App() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-base font-semibold text-white flex items-center space-x-2">
-                  <FileCode className="w-5 h-5 text-blue-400" />
-                  <span>Riwayat & Arsip Konfigurasi</span>
+                <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
+                  <FileCode className="w-5 h-5 text-blue-600" />
+                  <span>Riwayat &amp; Arsip Konfigurasi</span>
                 </h2>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-500">
                   Daftar seluruh file konfigurasi RouterOS yang tersimpan dan siap diunduh kapan saja
                 </p>
               </div>
 
               <button
                 onClick={() => setIsUploadModalOpen(true)}
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-all shadow-sm"
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all shadow-xs cursor-pointer"
               >
                 <Upload className="w-3.5 h-3.5" />
                 <span>Unggah File Backup</span>
@@ -513,46 +513,46 @@ export default function App() {
         {/* Tab 4: Restore Guide */}
         {activeTab === 'guide' && (
           <div className="space-y-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-              <h2 className="text-base font-semibold text-white mb-2">
-                Panduan Pemulihan (Disaster Recovery & Restore)
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
+              <h2 className="text-base font-bold text-slate-900 mb-1">
+                Panduan Pemulihan (Disaster Recovery &amp; Restore)
               </h2>
-              <p className="text-xs text-slate-400 mb-6">
+              <p className="text-xs text-slate-500 mb-6">
                 Ikuti langkah-langkah di bawah untuk memulihkan konfigurasi MikroTik Anda jika terjadi kerusakan hardware, pergantian router, atau kesalahan konfigurasi.
               </p>
 
-              {/* Directly inline the guide or open the modal */}
+              {/* Directly inline the guide */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-                  <div className="flex items-center space-x-2 text-blue-400">
+                <div className="p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center space-x-2 text-blue-600">
                     <FileCode className="w-5 h-5" />
-                    <h3 className="font-semibold text-white text-sm">File Teks (.rsc)</h3>
+                    <h3 className="font-bold text-slate-900 text-sm">File Teks (.rsc)</h3>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
+                  <p className="text-xs text-slate-600 leading-relaxed">
                     Format paling aman dan fleksibel. Berisi skrip CLI RouterOS yang dapat diimpor langsung atau disalin sebagian saja.
                   </p>
-                  <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 font-mono text-xs text-cyan-300">
+                  <div className="bg-slate-100 p-2.5 rounded-lg border border-slate-200 font-mono text-xs text-blue-950 font-semibold">
                     /import file-name=backup.rsc verbose=yes
                   </div>
-                  <ul className="text-xs text-slate-400 space-y-1 list-disc list-inside">
+                  <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
                     <li>Bisa diedit dengan teks editor biasa</li>
                     <li>Dapat direstore ke tipe router hardware berbeda</li>
                     <li>Mendukung perbandingan visual (Diff)</li>
                   </ul>
                 </div>
 
-                <div className="p-5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-                  <div className="flex items-center space-x-2 text-amber-400">
+                <div className="p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center space-x-2 text-amber-600">
                     <HardDrive className="w-5 h-5" />
-                    <h3 className="font-semibold text-white text-sm">File Binary (.backup)</h3>
+                    <h3 className="font-bold text-slate-900 text-sm">File Binary (.backup)</h3>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
+                  <p className="text-xs text-slate-600 leading-relaxed">
                     Salinan sistem penuh termasuk password login pengguna, sertifikat TLS, dan alamat MAC fisik interface.
                   </p>
-                  <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 font-mono text-xs text-amber-300">
+                  <div className="bg-amber-50 p-2.5 rounded-lg border border-amber-200 font-mono text-xs text-amber-950 font-semibold">
                     WinBox: Files &rarr; Pilih file .backup &rarr; Klik Restore
                   </div>
-                  <ul className="text-xs text-slate-400 space-y-1 list-disc list-inside">
+                  <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
                     <li>Router akan reboot otomatis setelah pemulihan</li>
                     <li>Hanya direkomendasikan untuk hardware yang identik</li>
                     <li>Menyimpan password asli</li>
@@ -563,6 +563,21 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Jet Cyber Network Footer */}
+      <footer className="border-t border-slate-200 bg-white py-6 mt-12 text-center text-xs text-slate-600">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center space-x-2">
+            <JetCyberLogo variant="icon" size={28} theme="light" />
+            <span className="font-bold text-slate-800">JET CYBER NETWORK</span>
+            <span className="text-slate-400">&bull;</span>
+            <span className="tracking-[0.2em] text-[10px] text-slate-500 font-bold uppercase">Reach Without Limits</span>
+          </div>
+          <div className="text-[11px] text-slate-500">
+            Sistem Otomasi Backup MikroTik RouterOS &bull; Real-Time Pull &amp; Webhook
+          </div>
+        </div>
+      </footer>
 
       {/* MODALS */}
 
@@ -644,28 +659,28 @@ export default function App() {
 
       {/* Delete Device Confirmation Dialog */}
       {deletingDevice && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="flex items-center space-x-3 text-rose-400 mb-3">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center space-x-3 text-rose-600 mb-3">
               <AlertTriangle className="w-6 h-6" />
-              <h3 className="font-semibold text-white text-base">Hapus Router Ini?</h3>
+              <h3 className="font-bold text-slate-900 text-base">Hapus Router Ini?</h3>
             </div>
-            <p className="text-xs text-slate-300 leading-relaxed mb-4">
-              Apakah Anda yakin ingin menghapus router <strong className="text-white">{deletingDevice.name}</strong> ({deletingDevice.ipHost})?
+            <p className="text-xs text-slate-600 leading-relaxed mb-4">
+              Apakah Anda yakin ingin menghapus router <strong className="text-slate-900">{deletingDevice.name}</strong> ({deletingDevice.ipHost})?
               Semua arsip file backup milik router ini juga akan dihapus permanen dari server.
             </p>
             <div className="flex items-center justify-end space-x-2">
               <button
                 onClick={() => setDeletingDevice(null)}
-                className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors"
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
               >
                 Batal
               </button>
               <button
                 onClick={confirmDeleteDevice}
-                className="px-4 py-2 text-xs font-medium text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors shadow-sm"
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-xs cursor-pointer"
               >
-                Ya, Hapus Router & Arsip
+                Ya, Hapus Router &amp; Arsip
               </button>
             </div>
           </div>
@@ -674,25 +689,25 @@ export default function App() {
 
       {/* Delete Backup Confirmation Dialog */}
       {deletingBackup && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="flex items-center space-x-3 text-rose-400 mb-3">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center space-x-3 text-rose-600 mb-3">
               <AlertTriangle className="w-6 h-6" />
-              <h3 className="font-semibold text-white text-base">Hapus File Backup?</h3>
+              <h3 className="font-bold text-slate-900 text-base">Hapus File Backup?</h3>
             </div>
-            <p className="text-xs text-slate-300 leading-relaxed mb-4">
-              Apakah Anda yakin ingin menghapus file backup <strong className="text-white font-mono">{deletingBackup.filename}</strong>? File fisik di server akan dibersihkan dan tidak dapat dipulihkan.
+            <p className="text-xs text-slate-600 leading-relaxed mb-4">
+              Apakah Anda yakin ingin menghapus file backup <strong className="text-slate-900 font-mono">{deletingBackup.filename}</strong>? File fisik di server akan dibersihkan dan tidak dapat dipulihkan.
             </p>
             <div className="flex items-center justify-end space-x-2">
               <button
                 onClick={() => setDeletingBackup(null)}
-                className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors"
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
               >
                 Batal
               </button>
               <button
                 onClick={confirmDeleteBackup}
-                className="px-4 py-2 text-xs font-medium text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors shadow-sm"
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-xs cursor-pointer"
               >
                 Hapus File
               </button>

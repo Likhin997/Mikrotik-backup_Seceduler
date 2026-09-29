@@ -17,6 +17,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { AuthUser } from '../types';
+import { JetCyberLogo } from './JetCyberLogo';
 
 interface NavbarProps {
   activeTab: 'devices' | 'backups' | 'logs' | 'guide';
@@ -28,8 +29,8 @@ interface NavbarProps {
   isRefreshing: boolean;
   totalBackups: number;
   currentUser?: AuthUser | null;
-  onOpenChangePassword: () => void;
-  onLogout: () => void;
+  onOpenChangePassword?: () => void;
+  onLogout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,68 +43,60 @@ export const Navbar: React.FC<NavbarProps> = ({
   isRefreshing,
   totalBackups,
   currentUser,
-  onOpenChangePassword,
-  onLogout
+  onOpenChangePassword = () => {},
+  onLogout = () => {}
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return (
-    <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30 shadow-md">
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo & Brand */}
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-              <Server className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="font-bold text-lg text-white tracking-tight">MikroTik</span>
-                <span className="px-2 py-0.5 text-xs font-semibold uppercase tracking-wider bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded">
-                  Auto Backup
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 hidden sm:block">
-                Penyimpanan Otomatis Konfigurasi RouterOS (.rsc & .backup)
-              </p>
-            </div>
-          </div>
+        <div className="flex items-center justify-between h-18">
+          {/* Logo & Brand: Heroic logo emblem with compact, sleek typography */}
+          <button
+            onClick={() => setActiveTab('devices')}
+            className="flex items-center text-left hover:opacity-95 transition-opacity cursor-pointer group py-1"
+          >
+            <JetCyberLogo variant="horizontal" size={62} theme="light" />
+          </button>
 
           {/* Navigation Links */}
-          <nav className="hidden md:flex items-center space-x-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800/80">
+          <nav className="hidden md:flex items-center space-x-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200">
             <button
               onClick={() => setActiveTab('devices')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 ${
+              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center space-x-2 cursor-pointer ${
                 activeTab === 'devices'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
               }`}
             >
               <HardDrive className="w-4 h-4" />
-              <span>Router & Jadwal</span>
+              <span>Router &amp; Jadwal</span>
             </button>
             <button
               onClick={() => setActiveTab('backups')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 ${
+              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center space-x-2 cursor-pointer ${
                 activeTab === 'backups'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
               }`}
             >
               <FileCode className="w-4 h-4" />
               <span>Riwayat Backup</span>
               {totalBackups > 0 && (
-                <span className="px-1.5 py-0.2 bg-slate-800 text-blue-400 text-xs rounded-full border border-blue-500/20">
+                <span className={`px-1.5 py-0.2 text-xs rounded-full font-bold ${
+                  activeTab === 'backups' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
+                }`}>
                   {totalBackups}
                 </span>
               )}
             </button>
             <button
               onClick={() => setActiveTab('logs')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 ${
+              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center space-x-2 cursor-pointer ${
                 activeTab === 'logs'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
               }`}
             >
               <Activity className="w-4 h-4" />
@@ -111,10 +104,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('guide')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 ${
+              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center space-x-2 cursor-pointer ${
                 activeTab === 'guide'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
               }`}
             >
               <HelpCircle className="w-4 h-4" />
@@ -128,31 +121,31 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={onRefresh}
               disabled={isRefreshing}
               title="Perbarui data"
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors border border-slate-800"
+              className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200 cursor-pointer disabled:opacity-50"
             >
-              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} />
             </button>
 
             <button
               onClick={onOpenDocker}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:text-white bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 rounded-lg transition-colors shadow-xs"
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-cyan-800 bg-cyan-50 hover:bg-cyan-100/80 border border-cyan-200 rounded-lg transition-colors shadow-xs cursor-pointer"
               title="Panduan Docker & Compose"
             >
-              <Box className="w-3.5 h-3.5 text-cyan-400" />
+              <Box className="w-3.5 h-3.5 text-cyan-600" />
               <span className="hidden sm:inline">Docker Run</span>
             </button>
 
             <button
               onClick={onOpenUpload}
-              className="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors shadow-sm"
+              className="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors shadow-xs cursor-pointer"
             >
-              <Upload className="w-3.5 h-3.5" />
+              <Upload className="w-3.5 h-3.5 text-slate-600" />
               <span>Unggah File</span>
             </button>
 
             <button
               onClick={onOpenAddDevice}
-              className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs sm:text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-lg transition-all shadow-md shadow-blue-500/20 active:scale-95"
+              className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs sm:text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all shadow-sm shadow-blue-600/20 active:scale-95 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span className="hidden sm:inline">Tambah Router</span>
@@ -164,13 +157,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="relative ml-1">
                 <button
                   onClick={() => setShowUserMenu(!showUserMenu)}
-                  className="flex items-center space-x-1.5 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 transition-all text-xs"
+                  className="flex items-center space-x-1.5 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-all text-xs cursor-pointer"
                 >
-                  <div className="w-6 h-6 rounded-full bg-blue-600/30 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-[11px]">
+                  <div className="w-6 h-6 rounded-full bg-blue-100 border border-blue-300 flex items-center justify-center text-blue-700 font-bold text-[11px]">
                     {currentUser.username.charAt(0).toUpperCase()}
                   </div>
-                  <span className="font-medium text-slate-200 hidden sm:inline">{currentUser.username}</span>
-                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                  <span className="font-semibold text-slate-800 hidden sm:inline">{currentUser.username}</span>
+                  <ChevronDown className="w-3 h-3 text-slate-500" />
                 </button>
 
                 {showUserMenu && (
@@ -179,14 +172,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                       className="fixed inset-0 z-40"
                       onClick={() => setShowUserMenu(false)}
                     />
-                    <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl py-1.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-150">
-                      <div className="px-3 py-2 border-b border-slate-800/80">
+                    <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3.5 py-2.5 border-b border-slate-100 bg-slate-50/60 rounded-t-xl">
                         <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                          <p className="font-semibold text-white">{currentUser.username}</p>
+                          <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                          <p className="font-bold text-slate-900">{currentUser.username}</p>
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5 flex items-center space-x-1">
-                          <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
+                        <p className="text-[11px] text-slate-500 mt-1 flex items-center space-x-1">
+                          <Clock className="w-3 h-3 text-blue-600 shrink-0" />
                           <span>Auto-Logout 30 Menit Idle</span>
                         </p>
                       </div>
@@ -196,20 +189,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                           setShowUserMenu(false);
                           onOpenChangePassword();
                         }}
-                        className="w-full text-left px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 flex items-center space-x-2 transition-colors cursor-pointer"
+                        className="w-full text-left px-3.5 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-50 flex items-center space-x-2 transition-colors cursor-pointer"
                       >
-                        <KeyRound className="w-3.5 h-3.5 text-blue-400" />
+                        <KeyRound className="w-3.5 h-3.5 text-blue-600" />
                         <span>Ganti Password</span>
                       </button>
 
-                      <div className="border-t border-slate-800/80 my-1" />
+                      <div className="border-t border-slate-100 my-1" />
 
                       <button
                         onClick={() => {
                           setShowUserMenu(false);
                           onLogout();
                         }}
-                        className="w-full text-left px-3 py-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 flex items-center space-x-2 transition-colors cursor-pointer"
+                        className="w-full text-left px-3.5 py-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50 flex items-center space-x-2 transition-colors cursor-pointer"
                       >
                         <LogOut className="w-3.5 h-3.5" />
                         <span>Keluar / Logout</span>
@@ -223,42 +216,42 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Mobile Navigation bar */}
-        <div className="flex md:hidden border-t border-slate-800 py-2 justify-around">
+        <div className="flex md:hidden border-t border-slate-200 py-2 justify-around bg-white">
           <button
             onClick={() => setActiveTab('devices')}
-            className={`px-3 py-1 text-xs font-medium rounded ${
-              activeTab === 'devices' ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400'
+            className={`px-3 py-1 text-xs font-semibold rounded cursor-pointer ${
+              activeTab === 'devices' ? 'text-blue-700 bg-blue-50' : 'text-slate-600'
             }`}
           >
             Router
           </button>
           <button
             onClick={() => setActiveTab('backups')}
-            className={`px-3 py-1 text-xs font-medium rounded ${
-              activeTab === 'backups' ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400'
+            className={`px-3 py-1 text-xs font-semibold rounded cursor-pointer ${
+              activeTab === 'backups' ? 'text-blue-700 bg-blue-50' : 'text-slate-600'
             }`}
           >
             Backup ({totalBackups})
           </button>
           <button
             onClick={() => setActiveTab('logs')}
-            className={`px-3 py-1 text-xs font-medium rounded ${
-              activeTab === 'logs' ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400'
+            className={`px-3 py-1 text-xs font-semibold rounded cursor-pointer ${
+              activeTab === 'logs' ? 'text-blue-700 bg-blue-50' : 'text-slate-600'
             }`}
           >
             Log
           </button>
           <button
             onClick={() => setActiveTab('guide')}
-            className={`px-3 py-1 text-xs font-medium rounded ${
-              activeTab === 'guide' ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400'
+            className={`px-3 py-1 text-xs font-semibold rounded cursor-pointer ${
+              activeTab === 'guide' ? 'text-blue-700 bg-blue-50' : 'text-slate-600'
             }`}
           >
             Panduan
           </button>
           <button
             onClick={onOpenUpload}
-            className="px-2 py-1 text-xs font-medium text-slate-300"
+            className="px-2 py-1 text-xs font-semibold text-slate-700 cursor-pointer"
           >
             Unggah
           </button>

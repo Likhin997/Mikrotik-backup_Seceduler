@@ -68,25 +68,25 @@ export const BackupTable: React.FC<BackupTableProps> = ({
     switch (trigger) {
       case 'scheduled':
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
             Jadwal Otomatis
           </span>
         );
       case 'webhook_push':
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-cyan-50 text-cyan-800 border border-cyan-200">
             Push RouterOS
           </span>
         );
       case 'rest_api':
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
             REST API Pull
           </span>
         );
       default:
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
             Manual
           </span>
         );
@@ -94,9 +94,9 @@ export const BackupTable: React.FC<BackupTableProps> = ({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
       {/* Table Filter Bar */}
-      <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+      <div className="p-4 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
         {/* Search Input */}
         <div className="relative flex-1 min-w-[240px]">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -105,12 +105,12 @@ export const BackupTable: React.FC<BackupTableProps> = ({
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Cari nama file, router, IP, atau catatan..."
-            className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+            className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
           />
           {search && (
             <button
               onClick={() => setSearch('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
             >
               &times;
             </button>
@@ -122,7 +122,7 @@ export const BackupTable: React.FC<BackupTableProps> = ({
           <select
             value={selectedDeviceFilter}
             onChange={e => setSelectedDeviceFilter(e.target.value)}
-            className="bg-slate-900 border border-slate-800 text-xs text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+            className="bg-white border border-slate-300 text-xs text-slate-800 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-600 cursor-pointer font-medium"
           >
             <option value="all">Semua Router ({devices.length})</option>
             {devices.map(d => (
@@ -133,33 +133,33 @@ export const BackupTable: React.FC<BackupTableProps> = ({
           </select>
 
           {/* Type Filter */}
-          <div className="flex bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs">
+          <div className="flex bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-xs font-semibold">
             <button
               onClick={() => setTypeFilter('all')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
+              className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
                 typeFilter === 'all'
-                  ? 'bg-blue-600 text-white font-medium'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-blue-600 text-white font-bold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Semua
             </button>
             <button
               onClick={() => setTypeFilter('rsc')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
+              className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
                 typeFilter === 'rsc'
-                  ? 'bg-blue-600 text-white font-medium'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-blue-600 text-white font-bold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               .rsc (Teks)
             </button>
             <button
               onClick={() => setTypeFilter('backup')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
+              className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
                 typeFilter === 'backup'
-                  ? 'bg-blue-600 text-white font-medium'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-blue-600 text-white font-bold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               .backup
@@ -168,20 +168,20 @@ export const BackupTable: React.FC<BackupTableProps> = ({
         </div>
       </div>
 
-      {/* Summary Chips */}
-      <div className="px-4 py-2 bg-slate-950/40 border-b border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+      {/* Summary Bar */}
+      <div className="px-4 py-2.5 bg-slate-50/40 border-b border-slate-200 flex items-center justify-between text-xs text-slate-600">
         <div className="flex items-center space-x-2">
           <span>
-            Menampilkan <strong className="text-white">{filtered.length}</strong> file konfigurasi
+            Menampilkan <strong className="text-slate-900">{filtered.length}</strong> file konfigurasi
           </span>
           <span>&bull;</span>
           <span>
-            Total ukuran: <strong className="text-white">{formatBytes(totalFilteredSize)}</strong>
+            Total ukuran: <strong className="text-slate-900">{formatBytes(totalFilteredSize)}</strong>
           </span>
         </div>
         <button
           onClick={onOpenUpload}
-          className="text-blue-400 hover:text-blue-300 font-medium hover:underline text-xs"
+          className="text-blue-600 hover:text-blue-700 font-semibold hover:underline text-xs cursor-pointer"
         >
           + Unggah File Backup
         </button>
@@ -191,8 +191,8 @@ export const BackupTable: React.FC<BackupTableProps> = ({
       <div className="overflow-x-auto">
         {filtered.length === 0 ? (
           <div className="py-16 text-center text-slate-500">
-            <FileCode className="w-12 h-12 mx-auto mb-3 text-slate-600" />
-            <p className="text-sm font-semibold text-slate-300">Tidak ada riwayat backup</p>
+            <FileCode className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+            <p className="text-sm font-bold text-slate-700">Tidak ada riwayat backup</p>
             <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
               {search || selectedDeviceFilter !== 'all' || typeFilter !== 'all'
                 ? 'Tidak ada hasil yang sesuai dengan kriteria filter saat ini.'
@@ -201,24 +201,24 @@ export const BackupTable: React.FC<BackupTableProps> = ({
           </div>
         ) : (
           <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-slate-950/80 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800 text-[11px]">
+            <thead className="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider border-b border-slate-200 text-[11px]">
               <tr>
-                <th className="py-3 px-4">Nama File & Tipe</th>
-                <th className="py-3 px-4">Router & IP</th>
+                <th className="py-3 px-4">Nama File &amp; Tipe</th>
+                <th className="py-3 px-4">Router &amp; IP</th>
                 <th className="py-3 px-4">Waktu Backup</th>
                 <th className="py-3 px-4">Metode Trigger</th>
                 <th className="py-3 px-4">Ukuran</th>
-                <th className="py-3 px-4 text-right">Aksi Unduh & Periksa</th>
+                <th className="py-3 px-4 text-right">Aksi Unduh &amp; Periksa</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 text-slate-300">
+            <tbody className="divide-y divide-slate-100 text-slate-700">
               {filtered.map(backup => {
                 const isRsc = backup.fileType === 'rsc';
 
                 return (
                   <tr
                     key={backup.id}
-                    className="hover:bg-slate-800/40 transition-colors group"
+                    className="hover:bg-slate-50/80 transition-colors group"
                   >
                     {/* Filename & Type Icon */}
                     <td className="py-3 px-4">
@@ -226,22 +226,22 @@ export const BackupTable: React.FC<BackupTableProps> = ({
                         <div
                           className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
                             isRsc
-                              ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              ? 'bg-blue-50 text-blue-600 border border-blue-200'
+                              : 'bg-amber-50 text-amber-600 border border-amber-200'
                           }`}
                         >
                           <FileCode className="w-4 h-4" />
                         </div>
                         <div>
                           <p
-                            className="font-semibold text-white font-mono text-xs hover:text-blue-400 cursor-pointer truncate max-w-xs sm:max-w-md"
+                            className="font-bold text-slate-900 font-mono text-xs hover:text-blue-600 cursor-pointer truncate max-w-xs sm:max-w-md"
                             onClick={() => (isRsc ? onViewContent(backup) : null)}
                             title={backup.filename}
                           >
                             {backup.filename}
                           </p>
                           {backup.notes && (
-                            <p className="text-[11px] text-slate-400 italic truncate max-w-xs">
+                            <p className="text-[11px] text-slate-500 italic truncate max-w-xs">
                               {backup.notes}
                             </p>
                           )}
@@ -251,13 +251,13 @@ export const BackupTable: React.FC<BackupTableProps> = ({
 
                     {/* Router Name & IP */}
                     <td className="py-3 px-4">
-                      <div className="font-medium text-white">{backup.deviceName}</div>
+                      <div className="font-semibold text-slate-900">{backup.deviceName}</div>
                       <div className="text-[11px] text-slate-500 font-mono">{backup.deviceIp}</div>
                     </td>
 
                     {/* Timestamp */}
                     <td className="py-3 px-4 whitespace-nowrap">
-                      <div className="text-white font-medium">{formatDate(backup.createdAt)}</div>
+                      <div className="text-slate-900 font-medium">{formatDate(backup.createdAt)}</div>
                       <div className="text-[11px] text-slate-500">
                         {formatTimeAgo(backup.createdAt)}
                       </div>
@@ -269,7 +269,7 @@ export const BackupTable: React.FC<BackupTableProps> = ({
                     </td>
 
                     {/* Size */}
-                    <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-300">
+                    <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-700 font-medium">
                       {formatBytes(backup.fileSize)}
                     </td>
 
@@ -280,7 +280,7 @@ export const BackupTable: React.FC<BackupTableProps> = ({
                         <a
                           href={api.getDownloadUrl(backup.id)}
                           download={backup.filename}
-                          className="inline-flex items-center space-x-1 px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs transition-colors shadow-xs"
+                          className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors shadow-xs"
                           title="Unduh file konfigurasi ke komputer"
                         >
                           <Download className="w-3.5 h-3.5" />
@@ -291,10 +291,10 @@ export const BackupTable: React.FC<BackupTableProps> = ({
                         {isRsc && (
                           <button
                             onClick={() => onViewContent(backup)}
-                            className="inline-flex items-center space-x-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition-colors border border-slate-700"
+                            className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs transition-colors border border-slate-200 cursor-pointer font-medium"
                             title="Buka isi script RouterOS di layar"
                           >
-                            <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                            <Eye className="w-3.5 h-3.5 text-cyan-600" />
                             <span>Lihat</span>
                           </button>
                         )}
@@ -303,10 +303,10 @@ export const BackupTable: React.FC<BackupTableProps> = ({
                         {isRsc && (
                           <button
                             onClick={() => onCompare(backup)}
-                            className="inline-flex items-center space-x-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition-colors border border-slate-700"
+                            className="inline-flex items-center space-x-1 px-2 py-1 rounded-md bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs transition-colors border border-purple-200 cursor-pointer font-medium"
                             title="Bandingkan perubahan dengan backup lain"
                           >
-                            <Layers className="w-3.5 h-3.5 text-purple-400" />
+                            <Layers className="w-3.5 h-3.5 text-purple-600" />
                             <span>Diff</span>
                           </button>
                         )}
@@ -314,7 +314,7 @@ export const BackupTable: React.FC<BackupTableProps> = ({
                         {/* Delete */}
                         <button
                           onClick={() => onDelete(backup)}
-                          className="p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-rose-500/10 transition-colors"
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 transition-colors cursor-pointer"
                           title="Hapus backup ini"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
