@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Install build dependencies
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # Copy all source files
 COPY . .
@@ -25,7 +25,7 @@ ENV PORT=3000
 
 # Install production dependencies only
 COPY package*.json ./
-RUN npm ci --only=production && \
+RUN npm install --omit=dev && \
     npm install -g tsx
 
 # Copy built assets and backend server script from builder stage

@@ -17,7 +17,7 @@ interface DockerModalProps {
 }
 
 export const DockerModal: React.FC<DockerModalProps> = ({ isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'compose' | 'quick' | 'cli'>('compose');
+  const [activeTab, setActiveTab] = useState<'compose' | 'quick' | 'cli' | 'github'>('compose');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -28,16 +28,14 @@ export const DockerModal: React.FC<DockerModalProps> = ({ isOpen, onClose }) => 
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const composeContent = `version: '3.8'
-
-services:
+  const composeContent = `services:
   mikrotik-backup:
     build: .
     image: mikrotik-backup-manager:latest
     container_name: mikrotik-backup-app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3003:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -54,13 +52,31 @@ docker build -t mikrotik-backup-manager .
 # 2. Buat folder penyimpanan di host
 mkdir -p $(pwd)/data/backups
 
-# 3. Jalankan container
+# 3. Jalankan container pada port 3003
 docker run -d \\
   --name mikrotik-backup-app \\
   --restart unless-stopped \\
-  -p 3000:3000 \\
+  -p 3003:3000 \\
   -v $(pwd)/data:/app/data \\
   mikrotik-backup-manager`;
+
+  const gitPushScript = `# 1. Inisialisasi Git di komputer lokal Anda
+git init
+git add .
+git commit -m "feat: initial commit mikrotik auto backup manager"
+git branch -M main
+
+# 2. Hubungkan ke Repository GitHub Anda (ganti URL sesuai repo Anda)
+git remote add origin https://github.com/USERNAME/NAMA_REPO.git
+git push -u origin main`;
+
+  const gitInstallScript = `# 1. Di server/VPS, clone repository Anda
+git clone https://github.com/USERNAME/NAMA_REPO.git
+cd NAMA_REPO
+
+# 2. Jalankan instalasi otomatis
+chmod +x install.sh
+./install.sh`;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
@@ -91,30 +107,38 @@ docker run -d \\
         {/* Content */}
         <div className="p-6 space-y-4">
           {/* Method Tabs */}
-          <div className="flex space-x-2 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-medium">
+          <div className="flex flex-wrap sm:flex-nowrap space-x-1 sm:space-x-2 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-medium">
             <button
               onClick={() => setActiveTab('compose')}
-              className={`flex-1 py-1.5 px-3 rounded-lg transition-all ${
+              className={`flex-1 py-1.5 px-2.5 rounded-lg transition-all ${
                 activeTab === 'compose' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
               }`}
             >
-              1. Docker Compose (Rekomendasi)
+              1. Docker Compose
             </button>
             <button
               onClick={() => setActiveTab('quick')}
-              className={`flex-1 py-1.5 px-3 rounded-lg transition-all ${
+              className={`flex-1 py-1.5 px-2.5 rounded-lg transition-all ${
                 activeTab === 'quick' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
               }`}
             >
-              2. Script Otomatis (install.sh)
+              2. Script Otomatis
             </button>
             <button
               onClick={() => setActiveTab('cli')}
-              className={`flex-1 py-1.5 px-3 rounded-lg transition-all ${
+              className={`flex-1 py-1.5 px-2.5 rounded-lg transition-all ${
                 activeTab === 'cli' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
               }`}
             >
-              3. Docker CLI Manual
+              3. Docker CLI
+            </button>
+            <button
+              onClick={() => setActiveTab('github')}
+              className={`flex-1 py-1.5 px-2.5 rounded-lg transition-all ${
+                activeTab === 'github' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              4. Git & GitHub
             </button>
           </div>
 
@@ -185,6 +209,46 @@ docker run -d \\
             </div>
           )}
 
+          {activeTab === 'github' && (
+            <div className="space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between text-slate-300 mb-1 font-semibold">
+                  <span>A. Cara Push File ke Repository GitHub:</span>
+                  <button
+                    onClick={() => handleCopy(gitPushScript, 'cmd-push')}
+                    className="text-cyan-400 hover:text-cyan-300 flex items-center space-x-1 font-normal text-[11px]"
+                  >
+                    {copiedKey === 'cmd-push' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedKey === 'cmd-push' ? 'Tersalin' : 'Salin Script Push'}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-cyan-300 overflow-x-auto max-h-40 leading-relaxed">
+                    <code>{gitPushScript}</code>
+                  </pre>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between text-slate-300 mb-1 font-semibold">
+                  <span>B. Cara Install di Server Baru dari GitHub:</span>
+                  <button
+                    onClick={() => handleCopy(gitInstallScript, 'cmd-install')}
+                    className="text-cyan-400 hover:text-cyan-300 flex items-center space-x-1 font-normal text-[11px]"
+                  >
+                    {copiedKey === 'cmd-install' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedKey === 'cmd-install' ? 'Tersalin' : 'Salin Script Install'}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-emerald-300 overflow-x-auto max-h-40 leading-relaxed">
+                    <code>{gitInstallScript}</code>
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Volume Persistent notice */}
           <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 flex items-start space-x-3">
             <HardDrive className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
@@ -199,7 +263,7 @@ docker run -d \\
 
         {/* Footer */}
         <div className="px-6 py-3 bg-slate-950/60 border-t border-slate-800 flex items-center justify-between text-xs">
-          <span className="text-slate-500">Port Default: 3000 &bull; Base Image: node:20-alpine</span>
+          <span className="text-slate-500">Port Host: 3003 (3003:3000) &bull; Base Image: node:20-alpine</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"

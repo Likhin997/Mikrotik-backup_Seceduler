@@ -1,24 +1,69 @@
-# MikroTik Auto Backup Manager (Docker Guide)
+# MikroTik Auto Backup Manager (Docker & GitHub Guide)
 
-Aplikasi otomatisasi backup konfigurasi MikroTik RouterOS (`.rsc` dan `.backup`) siap pakai dengan container Docker & Docker Compose.
+Aplikasi otomatisasi backup konfigurasi MikroTik RouterOS (`.rsc` dan `.backup`) siap pakai dengan container Docker & Docker Compose pada port **3003**.
 
 ---
 
-## 🚀 Cara Install Siap Pakai (Quick Start)
+## 🐙 Cara Kirim (Push) File ke GitHub
 
-### Metode 1: Menggunakan Script Otomatis (1 Langkah)
-Jalankan perintah berikut di terminal server Linux (Ubuntu, Debian, CentOS, Rocky, dll.):
+Jika Anda ingin menyimpan kode sumber ini ke akun GitHub Anda:
+
+### 1. Buat Repository Baru di GitHub
+1. Buka [github.com/new](https://github.com/new).
+2. Beri nama repository (contoh: `mikrotik-auto-backup`).
+3. Pilih **Public** atau **Private**, lalu klik **Create repository** (jangan centang *Initialize with README* karena file sudah tersedia di proyek ini).
+
+### 2. Upload / Push dari Terminal Komputer Anda
+Buka terminal di folder project ini, lalu jalankan perintah berikut:
 
 ```bash
-chmod +x install.sh
-./install.sh
+# 1. Inisialisasi Git lokal
+git init
+
+# 2. Tambahkan semua file (.gitignore otomatis mengamankan file backup & credential)
+git add .
+
+# 3. Buat commit pertama
+git commit -m "feat: initial commit mikrotik auto backup manager"
+
+# 4. Atur branch utama ke main
+git branch -M main
+
+# 5. Hubungkan ke repository GitHub Anda (ganti USERNAME dan NAMA_REPO dengan milik Anda)
+git remote add origin https://github.com/USERNAME/NAMA_REPO.git
+
+# 6. Kirim (push) file ke GitHub
+git push -u origin main
 ```
 
 ---
 
-### Metode 2: Menggunakan Docker Compose (Manual)
+## 🚀 Cara Install dari GitHub di Server / VPS Siap Pakai
 
-#### 1. Jalankan Container
+Setelah repository berada di GitHub, Anda dapat menginstalnya di server/VPS Linux dengan 3 langkah cepat:
+
+### Langkah 1: Clone Repository
+```bash
+git clone https://github.com/USERNAME/NAMA_REPO.git
+cd NAMA_REPO
+```
+
+### Langkah 2: Jalankan Instalasi Otomatis
+```bash
+chmod +x install.sh
+./install.sh
+```
+*Script ini otomatis menginstal Docker & Docker Compose (jika belum ada), membuat folder volume host persistent `./data`, mem-build image, dan menjalankan container pada port 3003.*
+
+### Langkah 3: Buka Dashboard di Browser
+Akses:
+👉 **`http://IP_SERVER:3003`** atau **`http://localhost:3003`**
+
+---
+
+## 🐳 Cara Install Manual Menggunakan Docker Compose (Alternatif)
+
+### 1. Jalankan Container
 Pastikan Anda berada di direktori project, lalu jalankan:
 
 ```bash
@@ -29,9 +74,9 @@ docker compose up -d --build
 #### 2. Buka Aplikasi di Browser
 Buka browser dan akses alamat IP server atau localhost:
 ```
-http://IP_SERVER:3000
+http://IP_SERVER:3003
 ```
-*(Contoh: `http://192.168.1.100:3000` atau `http://localhost:3000`)*
+*(Contoh: `http://192.168.1.100:3003` atau `http://localhost:3003`)*
 
 ---
 
@@ -44,11 +89,11 @@ docker build -t mikrotik-backup-manager:latest .
 # 2. Buat folder untuk penyimpanan file konfigurasi permanen
 mkdir -p $(pwd)/data/backups
 
-# 3. Jalankan container
+# 3. Jalankan container pada port 3003
 docker run -d \
   --name mikrotik-backup-app \
   --restart unless-stopped \
-  -p 3000:3000 \
+  -p 3003:3000 \
   -v $(pwd)/data:/app/data \
   mikrotik-backup-manager:latest
 ```
@@ -77,7 +122,7 @@ Semua data tersimpan otomatis di host pada folder `./data`:
 
 ## ⚙️ Cara Menghubungkan ke MikroTik RouterOS
 
-1. Buka Web Dashboard di `http://IP_SERVER:3000`.
+1. Buka Web Dashboard di `http://IP_SERVER:3003`.
 2. Klik tombol **Tambah Router** dan isi nama serta IP router MikroTik Anda.
 3. Klik tombol **Skrip RouterOS** pada kartu router.
 4. Salin skrip yang disediakan.

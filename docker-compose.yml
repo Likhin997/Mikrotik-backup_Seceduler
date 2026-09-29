@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mikrotik-backup:
     build:
@@ -9,12 +7,12 @@ services:
     container_name: mikrotik-backup-app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3003:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
       # Opsional: Jika menggunakan domain / reverse proxy (Nginx / Cloudflare Tunnel / Traefik / IP VPS)
-      # - APP_URL=http://192.168.1.100:3000
+      # - APP_URL=http://192.168.1.100:3003
     volumes:
       # Data konfigurasi router & file backup MikroTik tersimpan permanen di folder host ./data
       - ./data:/app/data
