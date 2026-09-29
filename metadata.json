@@ -1,0 +1,6 @@
+{
+  "name": "MikroTik Auto Backup Manager",
+  "description": "Aplikasi otomatisasi backup konfigurasi MikroTik RouterOS (.rsc dan .backup) dengan penjadwalan otomatis, penyimpanan data, visual diff, dan unduhan kapan saja.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
