@@ -28,6 +28,7 @@ import { ManualUploadModal } from './components/ManualUploadModal';
 import { BackupTable } from './components/BackupTable';
 import { RestoreGuideModal } from './components/RestoreGuideModal';
 import { ActivityLogsView } from './components/ActivityLogsView';
+import { DockerModal } from './components/DockerModal';
 import { Toast, ToastMessage } from './components/Toast';
 
 export default function App() {
@@ -57,6 +58,7 @@ export default function App() {
 
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isRestoreGuideOpen, setIsRestoreGuideOpen] = useState(false);
+  const [isDockerModalOpen, setIsDockerModalOpen] = useState(false);
 
   // Deletion confirms
   const [deletingDevice, setDeletingDevice] = useState<RouterDevice | null>(null);
@@ -185,6 +187,7 @@ export default function App() {
           setIsDeviceModalOpen(true);
         }}
         onOpenUpload={() => setIsUploadModalOpen(true)}
+        onOpenDocker={() => setIsDockerModalOpen(true)}
         onRefresh={() => loadData(false)}
         isRefreshing={isRefreshing}
         totalBackups={backups.length}
@@ -476,6 +479,12 @@ export default function App() {
       <RestoreGuideModal
         isOpen={isRestoreGuideOpen}
         onClose={() => setIsRestoreGuideOpen(false)}
+      />
+
+      {/* Docker Deployment Guide Modal */}
+      <DockerModal
+        isOpen={isDockerModalOpen}
+        onClose={() => setIsDockerModalOpen(false)}
       />
 
       {/* Delete Device Confirmation Dialog */}

@@ -8,7 +8,8 @@ import {
   RefreshCw,
   HelpCircle,
   Activity,
-  FileCode
+  FileCode,
+  Box
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -16,6 +17,7 @@ interface NavbarProps {
   setActiveTab: (tab: 'devices' | 'backups' | 'logs' | 'guide') => void;
   onOpenAddDevice: () => void;
   onOpenUpload: () => void;
+  onOpenDocker: () => void;
   onRefresh: () => void;
   isRefreshing: boolean;
   totalBackups: number;
@@ -26,6 +28,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   onOpenAddDevice,
   onOpenUpload,
+  onOpenDocker,
   onRefresh,
   isRefreshing,
   totalBackups
@@ -114,6 +117,15 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors border border-slate-800"
             >
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
+            </button>
+
+            <button
+              onClick={onOpenDocker}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:text-white bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 rounded-lg transition-colors shadow-xs"
+              title="Panduan Docker & Compose"
+            >
+              <Box className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">Docker Run</span>
             </button>
 
             <button
