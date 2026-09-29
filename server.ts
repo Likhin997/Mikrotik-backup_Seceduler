@@ -1439,10 +1439,11 @@ export async function createServer() {
       console.warn(`[REST Pull] /rest/execute warning:`, err.message);
     }
 
-    // 3. Fallback: Trigger export to file, then read content
+    // 3. Fallback: Trigger export to file, then read actual file contents
     if (!exportedText) {
       const tempFileName = `autobackup_${Date.now().toString(36)}`;
       try {
+        console.log(`[REST Pull] Mengekspor konfigurasi ke file ${tempFileName}.rsc di MikroTik...`);
         await mikrotikRequest({
           hostname: device.ipHost,
           port: activeCandidate.port,
@@ -1455,12 +1456,14 @@ export async function createServer() {
           timeoutMs: 15000
         });
 
+        // Tunggu router selesai menulis file ke disk
         await new Promise(r => setTimeout(r, 4000));
 
+        // 3a. Baca contents via .proplist=name,contents
         const fileRes = await mikrotikRequest({
           hostname: device.ipHost,
           port: activeCandidate.port,
-          path: `/rest/file/${tempFileName}.rsc`,
+          path: `/rest/file/${tempFileName}.rsc?.proplist=name,contents`,
           method: 'GET',
           username: device.username,
           password: device.password,
@@ -1471,17 +1474,90 @@ export async function createServer() {
         if (fileRes.status === 200 && fileRes.data) {
           try {
             const parsed = JSON.parse(fileRes.data);
-            if (parsed?.contents) {
-              exportedText = parsed.contents;
-            } else {
-              exportedText = fileRes.data;
+            const item = Array.isArray(parsed) ? parsed[0] : parsed;
+            if (item?.contents && typeof item.contents === 'string' && item.contents.length > 20) {
+              exportedText = item.contents;
+              console.log(`[REST Pull] Berhasil membaca contents file via .proplist (${exportedText.length} bytes)`);
             }
-          } catch {
-            exportedText = fileRes.data;
+          } catch {}
+        }
+
+        // 3b. Jika belum dapat, coba POST /rest/file/print dengan .proplist
+        if (!exportedText) {
+          const printRes = await mikrotikRequest({
+            hostname: device.ipHost,
+            port: activeCandidate.port,
+            path: '/rest/file/print',
+            method: 'POST',
+            username: device.username,
+            password: device.password,
+            useTls: activeCandidate.useTls,
+            body: { '.proplist': 'name,contents', '?name': `${tempFileName}.rsc` },
+            timeoutMs: 15000
+          });
+
+          if (printRes.status === 200 && printRes.data) {
+            try {
+              const parsed = JSON.parse(printRes.data);
+              const item = Array.isArray(parsed) ? parsed[0] : parsed;
+              if (item?.contents && typeof item.contents === 'string' && item.contents.length > 20) {
+                exportedText = item.contents;
+                console.log(`[REST Pull] Berhasil membaca contents file via /rest/file/print (${exportedText.length} bytes)`);
+              }
+            } catch {}
           }
         }
 
-        // Cleanup temp file
+        // 3c. Jika belum dapat, baca isi file menggunakan script :put execute
+        if (!exportedText) {
+          const readExec = await mikrotikRequest({
+            hostname: device.ipHost,
+            port: activeCandidate.port,
+            path: '/rest/execute',
+            method: 'POST',
+            username: device.username,
+            password: device.password,
+            useTls: activeCandidate.useTls,
+            body: { script: `:put [/file get [find name="${tempFileName}.rsc"] contents]` },
+            timeoutMs: 15000
+          });
+
+          if (readExec.status === 200 && readExec.data) {
+            try {
+              const parsed = JSON.parse(readExec.data);
+              const out = parsed?.output || parsed?.ret || readExec.data;
+              if (typeof out === 'string' && (out.includes('/interface') || out.includes('#') || out.length > 50)) {
+                exportedText = out;
+                console.log(`[REST Pull] Berhasil membaca contents file via :put execute (${exportedText.length} bytes)`);
+              }
+            } catch {
+              if (readExec.data.includes('/interface') || readExec.data.includes('#')) {
+                exportedText = readExec.data;
+              }
+            }
+          }
+        }
+
+        // 3d. Coba unduh file langsung via HTTP GET
+        if (!exportedText) {
+          const directFileRes = await mikrotikRequest({
+            hostname: device.ipHost,
+            port: activeCandidate.port,
+            path: `/${tempFileName}.rsc`,
+            method: 'GET',
+            username: device.username,
+            password: device.password,
+            useTls: activeCandidate.useTls,
+            timeoutMs: 15000
+          });
+
+          if (directFileRes.status === 200 && directFileRes.data && (directFileRes.data.includes('/interface') || directFileRes.data.includes('#'))) {
+            exportedText = directFileRes.data;
+            console.log(`[REST Pull] Berhasil download file rsc langsung via HTTP GET (${exportedText.length} bytes)`);
+          }
+        }
+
+        // Cleanup temp file dari MikroTik
         try {
           await mikrotikRequest({
             hostname: device.ipHost,
@@ -1499,9 +1575,10 @@ export async function createServer() {
       }
     }
 
-    // 4. Fallback: Query RouterOS endpoints directly to assemble live configuration
-    if (!exportedText) {
+    // 4. Fallback jika masih kosong atau hanya metadata: Ambil konfigurasi komprehensif via endpoint REST API
+    if (!exportedText || (exportedText.startsWith('{') && exportedText.includes('"type":"script"'))) {
       try {
+        console.log(`[REST Pull] Mengambil konfigurasi live detail via endpoint REST API modular...`);
         const parts: string[] = [
           `# MikroTik RouterOS ${version}`,
           `# identity = ${identity}`,
