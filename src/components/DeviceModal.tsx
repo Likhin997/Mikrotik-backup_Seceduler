@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Server, Shield, Clock, HelpCircle, Check, AlertCircle } from 'lucide-react';
+import { X, Server, Shield, Clock, HelpCircle, Check, AlertCircle, RefreshCw, Activity } from 'lucide-react';
 import { RouterDevice } from '../types';
+import { api } from '../services/api';
 
 interface DeviceModalProps {
   isOpen: boolean;
@@ -30,6 +31,37 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestConnection = async () => {
+    if (!ipHost.trim()) {
+      setTestResult({ success: false, message: 'Masukkan IP Address / Hostname router terlebih dahulu' });
+      return;
+    }
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const res = await api.testConnection({
+        ipHost: ipHost.trim(),
+        port: Number(port) || 443,
+        useTls,
+        username: username.trim() || 'admin',
+        password: password || undefined
+      });
+      setTestResult({ success: true, message: res.message });
+      if (res.model && !model) {
+        setModel(res.model);
+      }
+      if (res.identity && !name) {
+        setName(res.identity);
+      }
+    } catch (err: any) {
+      setTestResult({ success: false, message: err.message || 'Gagal menghubungi router' });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
 
   useEffect(() => {
     if (initialDevice) {
@@ -202,78 +234,131 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
           {/* Backup Mode / Protocol */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
-              <span>Metode Backup</span>
-              <span className="text-[11px] text-blue-600 font-bold">Rekomendasi: Webhook Push</span>
+              <span>Metode Penarikan Backup</span>
+              <span className="text-[11px] text-blue-600 font-bold">Rekomendasi: REST API v7</span>
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setProtocol('push_webhook')}
-                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
-                  protocol === 'push_webhook'
-                    ? 'border-blue-500 bg-blue-50/60 text-slate-900 shadow-xs'
-                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-900">Webhook Push (Otomatis)</span>
-                  {protocol === 'push_webhook' && <Check className="w-4 h-4 text-blue-600" />}
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  RouterOS mengekspor &amp; mengirim backup via <code className="text-blue-700 font-semibold">/tool fetch</code>. Bekerja meski router di balik NAT/CGNAT/PPPoE.
-                </p>
-              </button>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => setProtocol('rest_api')}
                 className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
                   protocol === 'rest_api'
-                    ? 'border-blue-500 bg-blue-50/60 text-slate-900 shadow-xs'
+                    ? 'border-blue-500 bg-blue-50/70 text-slate-900 shadow-xs'
                     : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-900">REST API v7 (Pull)</span>
+                  <span className="font-bold text-xs text-slate-900">REST API v7 (Pull Otomatis)</span>
                   {protocol === 'rest_api' && <Check className="w-4 h-4 text-blue-600" />}
                 </div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Aplikasi menarik langsung konfigurasi dari router via REST API MikroTik RouterOS v7.1+.
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  Server menarik langsung seluruh konfigurasi asli (.rsc) pada jadwal yang ditentukan (misal jam 02:00). Tanpa batasan ukuran file.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProtocol('push_webhook')}
+                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                  protocol === 'push_webhook'
+                    ? 'border-blue-500 bg-blue-50/70 text-slate-900 shadow-xs'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs text-slate-900">Webhook Push (Kirim dari Router)</span>
+                  {protocol === 'push_webhook' && <Check className="w-4 h-4 text-blue-600" />}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  RouterOS menjalankan skrip scheduler internal dan mengirim file via <code className="text-blue-700 font-semibold">/tool fetch</code>. Cocok jika router di balik NAT/CGNAT.
                 </p>
               </button>
             </div>
           </div>
 
-          {/* REST API Credentials (if selected) */}
-          {protocol === 'rest_api' && (
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-              <p className="text-xs text-slate-800 font-bold">Kredensial Login REST API RouterOS:</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Username RouterOS</label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={e => setUsername(e.target.value)}
-                    placeholder="admin"
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Password {initialDevice ? '(Kosongkan jika tak berubah)' : ''}
-                  </label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                </div>
+          {/* Router Credentials & Test Connection */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-800 font-bold">Kredensial Login MikroTik (Untuk Tarik Config Asli):</p>
+              <label className="flex items-center space-x-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={useTls}
+                  onChange={e => setUseTls(e.target.checked)}
+                  className="rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                />
+                <span>Gunakan HTTPS (SSL)</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Username Login</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  placeholder="admin"
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-600"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Password Login {initialDevice ? '(Kosongkan jika tak berubah)' : ''}
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-600"
+                />
               </div>
             </div>
-          )}
+
+            {/* Test Connection Button & Result */}
+            <div className="pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={testingConnection}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer shadow-2xs disabled:opacity-60 shrink-0"
+              >
+                {testingConnection ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                    <span>Menguji Koneksi ke MikroTik...</span>
+                  </>
+                ) : (
+                  <>
+                    <Activity className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Uji Koneksi Router Sekarang</span>
+                  </>
+                )}
+              </button>
+
+              <span className="text-[11px] text-slate-500">
+                Memastikan port dan login valid sebelum jadwal otomatis berjalan
+              </span>
+            </div>
+
+            {testResult && (
+              <div
+                className={`p-2.5 rounded-lg text-xs flex items-start space-x-2 border animate-in fade-in duration-150 ${
+                  testResult.success
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                    : 'bg-rose-50 text-rose-900 border-rose-200'
+                }`}
+              >
+                {testResult.success ? (
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                )}
+                <span className="leading-snug">{testResult.message}</span>
+              </div>
+            )}
+          </div>
 
           {/* Schedule Frequency & Time */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

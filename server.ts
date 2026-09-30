@@ -1675,20 +1675,24 @@ function filterStaticOnlyRsc(content: string): string {
     model?: string;
     activePort?: number;
   }> {
-    // Determine candidate ports to probe (user port first, then alternatives 444, 80, 443)
+    // Determine candidate ports to probe (user port first with and without TLS, then standard 443, 80, 444, 8080)
     const candidates: Array<{ port: number; useTls: boolean }> = [];
     const isConfiguredTls = device.port === 444 || device.port === 443 || device.useTls;
     candidates.push({ port: device.port, useTls: isConfiguredTls });
+    candidates.push({ port: device.port, useTls: !isConfiguredTls });
 
-    if (device.port === 80) {
-      candidates.push({ port: 444, useTls: true });
-      candidates.push({ port: 443, useTls: true });
-    } else if (device.port === 444) {
-      candidates.push({ port: 80, useTls: false });
-      candidates.push({ port: 443, useTls: true });
-    } else if (device.port === 443) {
-      candidates.push({ port: 444, useTls: true });
-      candidates.push({ port: 80, useTls: false });
+    const standardPorts = [
+      { port: 443, useTls: true },
+      { port: 80, useTls: false },
+      { port: 444, useTls: true },
+      { port: 8080, useTls: false },
+      { port: 8443, useTls: true }
+    ];
+
+    for (const p of standardPorts) {
+      if (!candidates.some(c => c.port === p.port && c.useTls === p.useTls)) {
+        candidates.push(p);
+      }
     }
 
     let activeCandidate = candidates[0];
@@ -2237,14 +2241,12 @@ function filterStaticOnlyRsc(content: string): string {
     };
   }
 
-  // 9. Manual Trigger "Backup Now" / Pull from Real MikroTik
-  app.post('/api/devices/:id/backup-now', requireAuth, async (req: Request, res: Response) => {
-    const device = db.devices.find(d => d.id === req.params.id);
-    if (!device) {
-      res.status(404).json({ error: 'Device not found' });
-      return;
-    }
-
+  // Unified function to execute backup for a device (Manual or Scheduled)
+  async function performDeviceBackup(
+    device: RouterDevice,
+    trigger: 'scheduled' | 'manual'
+  ): Promise<{ success: boolean; backup?: BackupRecord; error?: string }> {
+    const now = new Date();
     const devDir = path.resolve(BACKUPS_DIR, device.id);
     if (!fs.existsSync(devDir)) {
       fs.mkdirSync(devDir, { recursive: true });
@@ -2253,11 +2255,13 @@ function filterStaticOnlyRsc(content: string): string {
     let content = '';
     let parsedVersion = '7.x';
     let detectedModel = device.model || 'MikroTik RouterOS';
-    let isLiveRouter = false;
 
-    if (device.protocol === 'rest_api') {
+    // Check if device can be pulled via REST API (or has credentials configured)
+    const canPull = device.protocol === 'rest_api' || Boolean(device.username && device.password);
+
+    if (canPull) {
       try {
-        console.log(`[REST Pull] Menghubungi router ${device.name} di ${device.ipHost}:${device.port}...`);
+        console.log(`[Backup ${trigger.toUpperCase()}] Menghubungi router ${device.name} di ${device.ipHost}:${device.port}...`);
         const pullResult = await pullRealMikrotikConfig(device);
         content = pullResult.content;
         parsedVersion = pullResult.version || '7.x';
@@ -2265,24 +2269,68 @@ function filterStaticOnlyRsc(content: string): string {
         if (pullResult.identity) {
           device.name = pullResult.identity;
         }
-        isLiveRouter = true;
-        console.log(`[REST Pull] Berhasil menarik konfigurasi real dari ${device.name} (${content.length} bytes)`);
+        console.log(`[Backup ${trigger.toUpperCase()}] Berhasil menarik konfigurasi REAL dari ${device.name} (${content.length} bytes)`);
       } catch (err: any) {
-        console.error(`[REST Pull] Gagal mengambil konfigurasi dari ${device.name}:`, err.message);
-        res.status(502).json({
-          error: `Gagal menarik konfigurasi dari MikroTik (${device.ipHost}:${device.port}): ${err.message}`
+        console.error(`[Backup ${trigger.toUpperCase()}] Gagal mengambil konfigurasi dari ${device.name}:`, err.message);
+
+        device.lastBackupAt = now.toISOString();
+        device.lastBackupStatus = 'failed';
+        device.lastBackupMessage = `Gagal menarik backup REAL: ${err.message}`;
+
+        db.logs.unshift({
+          id: crypto.randomUUID(),
+          timestamp: now.toISOString(),
+          type: 'backup_failed',
+          deviceId: device.id,
+          deviceName: device.name,
+          message: `Backup ${trigger === 'scheduled' ? 'terjadwal otomatis' : 'manual'} GAGAL untuk ${device.name} (${device.ipHost}:${device.port}): ${err.message}`
         });
-        return;
+
+        saveDatabase(db);
+
+        return {
+          success: false,
+          error: `Gagal menarik konfigurasi REAL dari MikroTik (${device.ipHost}:${device.port}): ${err.message}`
+        };
       }
     } else {
-      // For push mode or simulation fallback
-      content = generateSampleRscContent(device.name, device.model, '7.16.1', 0);
+      // Device is in push_webhook mode and has no credentials for pull
+      const errMsg = `Router ${device.name} menggunakan mode Webhook Push dan belum memiliki kredensial REST API. Pasang skrip RouterOS di MikroTik untuk push backup otomatis, atau masukkan username & password login router pada menu Edit Router untuk penarikan otomatis dari server.`;
+      console.warn(`[Backup ${trigger.toUpperCase()}] ${errMsg}`);
+
+      device.lastBackupAt = now.toISOString();
+      device.lastBackupStatus = 'failed';
+      device.lastBackupMessage = errMsg;
+
+      db.logs.unshift({
+        id: crypto.randomUUID(),
+        timestamp: now.toISOString(),
+        type: 'backup_failed',
+        deviceId: device.id,
+        deviceName: device.name,
+        message: errMsg
+      });
+
+      saveDatabase(db);
+
+      return {
+        success: false,
+        error: errMsg
+      };
     }
 
-    const now = new Date();
+    if (!content || content.trim().length === 0) {
+      const errMsg = `Konfigurasi yang ditarik dari router ${device.name} kosong (0 byte). Periksa hak akses user REST API di MikroTik.`;
+      device.lastBackupAt = now.toISOString();
+      device.lastBackupStatus = 'failed';
+      device.lastBackupMessage = errMsg;
+      saveDatabase(db);
+      return { success: false, error: errMsg };
+    }
+
     const timestampStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const safeDevName = device.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filename = `${safeDevName}_${isLiveRouter ? 'live' : 'manual'}_${timestampStr}.rsc`;
+    const filename = `${safeDevName}_${trigger === 'scheduled' ? 'sched' : 'live'}_${timestampStr}.rsc`;
     const filePath = path.resolve(devDir, filename);
 
     fs.writeFileSync(filePath, content, 'utf-8');
@@ -2297,14 +2345,14 @@ function filterStaticOnlyRsc(content: string): string {
       fileSize: Buffer.byteLength(content, 'utf-8'),
       filePath: filePath,
       contentPreview: content.slice(0, 400),
-      trigger: 'manual',
+      trigger: trigger,
       status: 'success',
       routerOsVersion: parsedVersion,
       model: detectedModel,
       metadata: parseRscStats(content),
-      notes: isLiveRouter
-        ? `Backup live real-time diambil via REST API v7 MikroTik (${device.ipHost}:${device.port})`
-        : 'Backup manual instan via dashboard admin',
+      notes: trigger === 'scheduled'
+        ? `Backup otomatis terjadwal REAL via REST API v7 (${device.ipHost}:${device.port})`
+        : `Backup live real-time diambil via REST API v7 MikroTik (${device.ipHost}:${device.port})`,
       createdAt: now.toISOString()
     };
 
@@ -2312,7 +2360,7 @@ function filterStaticOnlyRsc(content: string): string {
 
     device.lastBackupAt = now.toISOString();
     device.lastBackupStatus = 'success';
-    device.lastBackupMessage = `Backup ${isLiveRouter ? 'REAL MikroTik' : 'manual'} berhasil (${(backupRecord.fileSize / 1024).toFixed(1)} KB)`;
+    device.lastBackupMessage = `Backup REAL MikroTik berhasil (${(backupRecord.fileSize / 1024).toFixed(1)} KB)`;
     device.backupCount = db.backups.filter(b => b.deviceId === device.id).length;
     device.totalStorageBytes = db.backups.filter(b => b.deviceId === device.id).reduce((sum, b) => sum + b.fileSize, 0);
 
@@ -2324,16 +2372,169 @@ function filterStaticOnlyRsc(content: string): string {
       type: 'backup_success',
       deviceId: device.id,
       deviceName: device.name,
-      message: `Backup ${isLiveRouter ? 'Live Real' : 'manual'} berhasil disimpan untuk ${device.name}: ${filename}`
+      message: `Backup ${trigger === 'scheduled' ? 'terjadwal otomatis' : 'manual'} REAL berhasil disimpan untuk ${device.name}: ${filename}`
     });
 
     saveDatabase(db);
 
-    res.json({
+    return {
       success: true,
-      message: `Konfigurasi REAL dari MikroTik ${device.name} berhasil ditarik dan disimpan!`,
       backup: backupRecord
-    });
+    };
+  }
+
+  // 9. Manual Trigger "Backup Now" / Pull from Real MikroTik
+  app.post('/api/devices/:id/backup-now', requireAuth, async (req: Request, res: Response) => {
+    const device = db.devices.find(d => d.id === req.params.id);
+    if (!device) {
+      res.status(404).json({ error: 'Device not found' });
+      return;
+    }
+
+    const result = await performDeviceBackup(device, 'manual');
+    if (result.success) {
+      res.json({
+        success: true,
+        message: `Konfigurasi REAL dari MikroTik ${device.name} berhasil ditarik dan disimpan!`,
+        backup: result.backup
+      });
+    } else {
+      res.status(502).json({
+        error: result.error || 'Gagal menarik backup dari router MikroTik'
+      });
+    }
+  });
+
+  // 9b. Test Connection to MikroTik Router
+  app.post('/api/devices/test-connection', requireAuth, async (req: Request, res: Response) => {
+    const { ipHost, port, useTls, username, password } = req.body;
+    if (!ipHost) {
+      res.status(400).json({ error: 'IP Address / Hostname wajib diisi' });
+      return;
+    }
+
+    try {
+      const dummyDevice: RouterDevice = {
+        id: 'test',
+        name: 'Test Device',
+        model: '',
+        ipHost: ipHost.trim(),
+        port: Number(port) || 443,
+        protocol: 'rest_api',
+        username: username ? username.trim() : 'admin',
+        password: password || '',
+        useTls: Boolean(useTls),
+        webhookToken: '',
+        scheduleFrequency: 'daily',
+        retentionCount: 10,
+        enabled: true,
+        backupCount: 0,
+        totalStorageBytes: 0,
+        createdAt: '',
+        updatedAt: ''
+      };
+
+      const candidates: Array<{ port: number; useTls: boolean }> = [];
+      const isConfiguredTls = dummyDevice.port === 444 || dummyDevice.port === 443 || dummyDevice.useTls;
+      candidates.push({ port: dummyDevice.port, useTls: isConfiguredTls });
+      candidates.push({ port: dummyDevice.port, useTls: !isConfiguredTls });
+
+      const standardPorts = [
+        { port: 443, useTls: true },
+        { port: 80, useTls: false },
+        { port: 444, useTls: true },
+        { port: 8080, useTls: false },
+        { port: 8443, useTls: true }
+      ];
+
+      for (const p of standardPorts) {
+        if (!candidates.some(c => c.port === p.port && c.useTls === p.useTls)) {
+          candidates.push(p);
+        }
+      }
+
+      let connected = false;
+      let identity = 'MikroTik';
+      let version = '7.x';
+      let model = 'RouterOS';
+      let activeCandidate = candidates[0];
+      let lastErr = '';
+
+      for (const cand of candidates) {
+        try {
+          const identRes = await mikrotikRequest({
+            hostname: dummyDevice.ipHost,
+            port: cand.port,
+            path: '/rest/system/identity',
+            method: 'GET',
+            username: dummyDevice.username,
+            password: dummyDevice.password,
+            useTls: cand.useTls,
+            timeoutMs: 5000
+          });
+
+          if (identRes.status === 401 || identRes.status === 403) {
+            res.status(401).json({
+              error: `Autentikasi ditolak (HTTP ${identRes.status}) di port ${cand.port}. Username (${dummyDevice.username}) atau password login MikroTik salah, atau user tidak memiliki akses 'rest-api'.`
+            });
+            return;
+          }
+
+          if (identRes.status === 200) {
+            connected = true;
+            activeCandidate = { port: identRes.finalPort || cand.port, useTls: identRes.finalTls !== undefined ? identRes.finalTls : cand.useTls };
+            try {
+              const p = JSON.parse(identRes.data);
+              if (p?.name) identity = p.name;
+            } catch {}
+            break;
+          } else {
+            lastErr = `Port ${cand.port} merespons HTTP ${identRes.status}`;
+          }
+        } catch (e: any) {
+          lastErr = e.message;
+        }
+      }
+
+      if (!connected) {
+        res.status(502).json({
+          error: `Gagal terhubung ke MikroTik di ${ipHost}:${dummyDevice.port}. ${lastErr || 'Koneksi ditolak atau timeout'}. Pastikan port REST API aktif (service www di port 80 atau www-ssl di port 443 pada menu IP -> Services MikroTik).`
+        });
+        return;
+      }
+
+      try {
+        const resRes = await mikrotikRequest({
+          hostname: dummyDevice.ipHost,
+          port: activeCandidate.port,
+          path: '/rest/system/resource',
+          method: 'GET',
+          username: dummyDevice.username,
+          password: dummyDevice.password,
+          useTls: activeCandidate.useTls,
+          timeoutMs: 6000
+        });
+        if (resRes.status === 200 && resRes.data) {
+          try {
+            const p = JSON.parse(resRes.data);
+            if (p?.version) version = p.version;
+            if (p?.['board-name']) model = p['board-name'];
+          } catch {}
+        }
+      } catch {}
+
+      res.json({
+        success: true,
+        identity,
+        version,
+        model,
+        port: activeCandidate.port,
+        useTls: activeCandidate.useTls,
+        message: `Berhasil terhubung ke MikroTik ${identity} (${model}) - RouterOS v${version} pada port ${activeCandidate.port} (${activeCandidate.useTls ? 'HTTPS' : 'HTTP'})!`
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Gagal menguji koneksi ke router' });
+    }
   });
 
   // 10. Delete a Backup Record
@@ -2385,84 +2586,45 @@ function filterStaticOnlyRsc(content: string): string {
   });
 
   // --- Background Scheduler ---
-  // Runs check every 60 seconds to emulate automatic background scheduled backups
-  setInterval(() => {
+  // Runs check every 30 seconds for scheduled automatic backups
+  setInterval(async () => {
     const now = new Date();
     const currentHourMinute = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const todayDateString = now.toDateString();
 
-    db.devices.forEach(device => {
-      if (!device.enabled) return;
+    for (const device of db.devices) {
+      if (!device.enabled) continue;
 
       let shouldRun = false;
 
-      // Check if scheduled time matches
+      // 1. Daily schedule check (e.g. 02:00)
       if (device.scheduleFrequency === 'daily' && device.scheduleTime === currentHourMinute) {
         // Run once per day
-        if (!device.lastBackupAt || new Date(device.lastBackupAt).toDateString() !== now.toDateString()) {
+        const lastBackupDate = device.lastBackupAt ? new Date(device.lastBackupAt).toDateString() : null;
+        if (lastBackupDate !== todayDateString) {
           shouldRun = true;
         }
       } else if (device.scheduleFrequency === 'hourly' && now.getMinutes() === 0) {
+        // Run once per hour
+        const lastBackupHour = device.lastBackupAt ? new Date(device.lastBackupAt).getHours() : -1;
+        const lastBackupDate = device.lastBackupAt ? new Date(device.lastBackupAt).toDateString() : null;
+        if (lastBackupDate !== todayDateString || lastBackupHour !== now.getHours()) {
+          shouldRun = true;
+        }
+      } else if (device.scheduleFrequency === '6hours' && now.getMinutes() === 0 && now.getHours() % 6 === 0) {
         shouldRun = true;
       }
 
-      if (shouldRun && device.protocol === 'rest_api') {
-        console.log(`[AutoScheduler] Running scheduled backup for ${device.name}...`);
+      if (shouldRun) {
+        console.log(`[AutoScheduler] Waktu jadwal (${device.scheduleTime || device.scheduleFrequency}) tercapai untuk ${device.name}. Menjalankan backup REAL dari router MikroTik...`);
         try {
-          const devDir = path.resolve(BACKUPS_DIR, device.id);
-          if (!fs.existsSync(devDir)) fs.mkdirSync(devDir, { recursive: true });
-
-          const timestampStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          const safeDevName = device.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-          const filename = `${safeDevName}_sched_${timestampStr}.rsc`;
-          const filePath = path.resolve(devDir, filename);
-
-          const content = generateSampleRscContent(device.name, device.model, '7.16.1', 0);
-          fs.writeFileSync(filePath, content, 'utf-8');
-
-          const newBackup: BackupRecord = {
-            id: crypto.randomUUID(),
-            deviceId: device.id,
-            deviceName: device.name,
-            deviceIp: device.ipHost,
-            filename: filename,
-            fileType: 'rsc',
-            fileSize: Buffer.byteLength(content, 'utf-8'),
-            filePath: filePath,
-            contentPreview: content.slice(0, 400),
-            trigger: 'scheduled',
-            status: 'success',
-            routerOsVersion: '7.16.1',
-            model: device.model,
-            metadata: parseRscStats(content),
-            notes: 'Backup otomatis terjadwal oleh server',
-            createdAt: now.toISOString()
-          };
-
-          db.backups.push(newBackup);
-          device.lastBackupAt = now.toISOString();
-          device.lastBackupStatus = 'success';
-          device.lastBackupMessage = `Backup terjadwal otomatis tersimpan (${(newBackup.fileSize / 1024).toFixed(1)} KB)`;
-          device.backupCount = db.backups.filter(b => b.deviceId === device.id).length;
-          device.totalStorageBytes = db.backups.filter(b => b.deviceId === device.id).reduce((sum, b) => sum + b.fileSize, 0);
-
-          applyRetention(device);
-
-          db.logs.unshift({
-            id: crypto.randomUUID(),
-            timestamp: now.toISOString(),
-            type: 'backup_success',
-            deviceId: device.id,
-            deviceName: device.name,
-            message: `Scheduler otomatis mengeksekusi backup untuk ${device.name}`
-          });
-
-          saveDatabase(db);
+          await performDeviceBackup(device, 'scheduled');
         } catch (err) {
-          console.error(`Error during scheduled backup for ${device.name}:`, err);
+          console.error(`[AutoScheduler] Error saat mengeksekusi backup untuk ${device.name}:`, err);
         }
       }
-    });
-  }, 60000);
+    }
+  }, 30000);
 
   // Mount Vite or static files
   if (!isProd) {

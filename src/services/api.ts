@@ -183,6 +183,33 @@ export const api = {
     return res.json();
   },
 
+  async testConnection(data: {
+    ipHost: string;
+    port: number;
+    useTls: boolean;
+    username?: string;
+    password?: string;
+  }): Promise<{
+    success: boolean;
+    identity?: string;
+    version?: string;
+    model?: string;
+    port: number;
+    useTls: boolean;
+    message: string;
+  }> {
+    const res = await fetchWithAuth('/api/devices/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(result.error || 'Gagal terhubung ke router MikroTik');
+    }
+    return result;
+  },
+
   async getBackups(params?: { deviceId?: string; search?: string; type?: string }): Promise<BackupRecord[]> {
     const query = new URLSearchParams();
     if (params?.deviceId) query.set('deviceId', params.deviceId);
