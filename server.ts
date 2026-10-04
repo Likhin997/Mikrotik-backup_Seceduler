@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import multer from 'multer';
 import http from 'http';
 import https from 'https';
+import net from 'net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,7 +34,8 @@ export interface RouterDevice {
   model: string;
   ipHost: string;
   port: number;
-  protocol: 'push_webhook' | 'rest_api' | 'ssh_pull';
+  protocol: 'push_webhook' | 'rest_api' | 'ssh_pull' | 'api_binary';
+  osVersion?: 'v7' | 'v6';
   username?: string;
   password?: string;
   useTls: boolean;
@@ -359,8 +361,28 @@ function parseRscStats(content: string) {
     if (count > 0) interfacesCount = count;
   }
 
+  // Count VLANs
+  const vlanBlocks = content.match(/\/interface (bridge\s+vlan|vlan)[\s\S]*?(?=\/[a-z]|$)/g);
+  let vlansCount = 0;
+  if (vlanBlocks) {
+    vlanBlocks.forEach(b => {
+      vlansCount += (b.match(/add /g) || []).length;
+    });
+  }
+
+  // Count DHCP servers and networks
+  const dhcpBlocks = content.match(/\/ip dhcp-server[\s\S]*?(?=\/[a-z]|$)/g);
+  let dhcpCount = 0;
+  if (dhcpBlocks) {
+    dhcpBlocks.forEach(b => {
+      dhcpCount += (b.match(/add /g) || []).length;
+    });
+  }
+
   return {
     interfacesCount,
+    vlansCount,
+    dhcpCount,
     ipAddressesCount: ipCount || 4,
     firewallRulesCount: filterCount + natCount || 12,
     routesCount: routesCount || 2,
@@ -1014,49 +1036,130 @@ export async function createServer() {
     const scriptName = 'autobackup-push';
     const schedulerName = 'sched-autobackup';
 
-    // RouterOS Terminal Command for Text Export (.rsc)
+    // RouterOS v7 Terminal Command for Text Export (.rsc)
     const scriptContentRsc = `# =========================================================
-# MikroTik Auto Backup Script (.rsc Text Export)
+# MikroTik RouterOS v7 Auto Backup Script (.rsc Text Export)
 # Target Device: ${device.name} (${device.ipHost})
-# Frequency: ${device.scheduleFrequency} (${intervalStr})
+# Frekuensi: ${device.scheduleFrequency} (Interval: ${intervalStr})
+# Mengunggah seluruh konfigurasi (termasuk VLAN & DHCP) tanpa limit 4KB
 # =========================================================
 
 # 1. Hapus script & scheduler lama jika ada
 /system scheduler remove [find name="${schedulerName}"]
 /system script remove [find name="${scriptName}"]
 
-# 2. Buat Script Backup Ekspor Konfigurasi & Kirim ke App
+# 2. Buat Script Backup Ekspor Konfigurasi & Kirim ke App (RouterOS v7)
 /system script add name="${scriptName}" policy=read,write,policy,test source="\\
     :local devName [/system identity get name];\\
     :local baseName (\\\$devName . \\\"_backup\\\");\\
     :local fileName (\\\$baseName . \\\".rsc\\\");\\
-    :log info (\\\"[AutoBackup] Memulai ekspor konfigurasi: \\\" . \\\$fileName);\\
+    :log info (\\\"[AutoBackup v7] Memulai ekspor konfigurasi lengkap (.rsc): \\\" . \\\$fileName);\\
     /export show-sensitive file=\\\$baseName;\\
-    :delay 4s;\\
-    :log info (\\\"[AutoBackup] Membaca isi konfigurasi...\\\");\\
-    :local fileContent [/file get [find name=\\\$fileName] contents];\\
-    :log info (\\\"[AutoBackup] Mengunggah konfigurasi ke Backup Manager...\\\");\\
-    :local postUrl (\\\"${webhookUrl}&filename=\\\" . \\\$fileName);\\
-    /tool fetch http-method=post http-header-field=\\\"Content-Type: text/plain\\\" http-data=\\\$fileContent url=\\\$postUrl;\\
-    :log info (\\\"[AutoBackup] Konfigurasi berhasil terkirim ke server!\\\");\\
+    :delay 5s;\\
+    :log info (\\\"[AutoBackup v7] Mengunggah file ke Backup Manager...\\\");\\
+    :local postUrl (\\\"${webhookUrl}&type=rsc&filename=\\\" . \\\$fileName);\\
+    /tool fetch url=\\\$postUrl upload=yes src-path=\\\$fileName http-method=post;\\
+    :delay 2s;\\
+    :log info (\\\"[AutoBackup v7] Konfigurasi berhasil terkirim ke server!\\\");\\
     /file remove [find name=\\\$fileName];\\
 "
 
 # 3. Jadwalkan Eksekusi Otomatis
 /system scheduler add name="${schedulerName}" interval=${intervalStr} start-time=${startTimeStr} on-event="${scriptName}"
 
-# 4. Uji Jalankan Sekali Sekarang
+# 4. Jalankan Tes Pertama Kali Sekarang
 /system script run "${scriptName}"
 `;
 
-    // RouterOS Terminal Command for Binary Backup (.backup)
+    // RouterOS v7 Terminal Command for Binary System Backup (.backup)
     const scriptContentBinary = `# =========================================================
-# MikroTik Auto Backup Script (.rsc Text Export)
-# Target Device: ${device.name}
+# MikroTik RouterOS v7 Binary System Backup (.backup)
+# Target Device: ${device.name} (${device.ipHost})
 # =========================================================
-# Catatan: File .backup binary MikroTik hanya dapat diunggah
-# melalui SFTP/FTP atau ditarik via REST API v7 (Pull).
-# Gunakan tab '.rsc Text Export' untuk ekspor skrip otomatis.
+
+/system scheduler remove [find name="${schedulerName}-bin"]
+/system script remove [find name="${scriptName}-bin"]
+
+/system script add name="${scriptName}-bin" policy=read,write,policy,test source="\\
+    :local devName [/system identity get name];\\
+    :local baseName (\\\$devName . \\\"_system\\\");\\
+    :local fileName (\\\$baseName . \\\".backup\\\");\\
+    :log info (\\\"[AutoBackup v7] Menyimpan binary backup sistem...\\\");\\
+    /system backup save name=\\\$baseName;\\
+    :delay 5s;\\
+    :log info (\\\"[AutoBackup v7] Mengunggah file .backup ke Backup Manager...\\\");\\
+    :local postUrl (\\\"${webhookUrl}&type=backup&filename=\\\" . \\\$fileName);\\
+    /tool fetch url=\\\$postUrl upload=yes src-path=\\\$fileName http-method=post;\\
+    :delay 2s;\\
+    :log info (\\\"[AutoBackup v7] Binary backup berhasil terkirim ke server!\\\");\\
+    /file remove [find name=\\\$fileName];\\
+"
+
+/system scheduler add name="${schedulerName}-bin" interval=${intervalStr} start-time=${startTimeStr} on-event="${scriptName}-bin"
+/system script run "${scriptName}-bin"
+`;
+
+    // RouterOS v6 Terminal Command for Text Export (.rsc) - Legacy RouterOS 6.x
+    const scriptContentRscV6 = `# =========================================================
+# MikroTik RouterOS v6 Auto Backup Script (.rsc Text Export)
+# Target Device: ${device.name} (${device.ipHost})
+# Kompatibel untuk CCR, RB, dan RouterOS 6.40 s/d 6.49+
+# Mengunggah seluruh konfigurasi (termasuk VLAN & DHCP) tanpa limit 4KB
+# =========================================================
+
+# 1. Hapus script & scheduler lama jika ada
+/system scheduler remove [find name="${schedulerName}"]
+/system script remove [find name="${scriptName}"]
+
+# 2. Buat Script Ekspor Konfigurasi & Kirim ke App (RouterOS v6)
+/system script add name="${scriptName}" policy=read,write,policy,test source="\\
+    :local devName [/system identity get name];\\
+    :local baseName (\\\$devName . \\\"_backup\\\");\\
+    :local fileName (\\\$baseName . \\\".rsc\\\");\\
+    :log info (\\\"[AutoBackup v6] Memulai ekspor konfigurasi RouterOS v6: \\\" . \\\$fileName);\\
+    /export compact file=\\\$baseName;\\
+    :delay 5s;\\
+    :log info (\\\"[AutoBackup v6] Mengunggah konfigurasi langsung ke Backup Manager...\\\");\\
+    :local postUrl (\\\"${webhookUrl}&type=rsc&filename=\\\" . \\\$fileName);\\
+    /tool fetch url=\\\$postUrl upload=yes src-path=\\\$fileName mode=http;\\
+    :delay 2s;\\
+    :log info (\\\"[AutoBackup v6] Konfigurasi v6 berhasil terkirim ke server!\\\");\\
+    /file remove [find name=\\\$fileName];\\
+"
+
+# 3. Jadwalkan Eksekusi Otomatis
+/system scheduler add name="${schedulerName}" interval=${intervalStr} start-time=${startTimeStr} on-event="${scriptName}"
+
+# 4. Jalankan Tes Pertama Kali Sekarang
+/system script run "${scriptName}"
+`;
+
+    // RouterOS v6 Terminal Command for Binary System Backup (.backup)
+    const scriptContentBinaryV6 = `# =========================================================
+# MikroTik RouterOS v6 Binary System Backup (.backup)
+# Target Device: ${device.name} (${device.ipHost})
+# =========================================================
+
+/system scheduler remove [find name="${schedulerName}-bin"]
+/system script remove [find name="${scriptName}-bin"]
+
+/system script add name="${scriptName}-bin" policy=read,write,policy,test source="\\
+    :local devName [/system identity get name];\\
+    :local baseName (\\\$devName . \\\"_system\\\");\\
+    :local fileName (\\\$baseName . \\\".backup\\\");\\
+    :log info (\\\"[AutoBackup v6] Menyimpan binary backup sistem v6...\\\");\\
+    /system backup save name=\\\$baseName;\\
+    :delay 5s;\\
+    :log info (\\\"[AutoBackup v6] Mengunggah file .backup ke Backup Manager...\\\");\\
+    :local postUrl (\\\"${webhookUrl}&type=backup&filename=\\\" . \\\$fileName);\\
+    /tool fetch url=\\\$postUrl upload=yes src-path=\\\$fileName mode=http;\\
+    :delay 2s;\\
+    :log info (\\\"[AutoBackup v6] Binary backup v6 berhasil terkirim ke server!\\\");\\
+    /file remove [find name=\\\$fileName];\\
+"
+
+/system scheduler add name="${schedulerName}-bin" interval=${intervalStr} start-time=${startTimeStr} on-event="${scriptName}-bin"
+/system script run "${scriptName}-bin"
 `;
 
     res.json({
@@ -1068,7 +1171,9 @@ export async function createServer() {
       interval: intervalStr,
       startTime: startTimeStr,
       scriptContentRsc,
-      scriptContentBinary
+      scriptContentBinary,
+      scriptContentRscV6,
+      scriptContentBinaryV6
     });
   });
 
@@ -1667,6 +1772,512 @@ function filterStaticOnlyRsc(content: string): string {
     });
   }
 
+  // --- RouterOS API Protocol Implementation (Port 8728 / 8729) for MikroTik v6 & v7 ---
+  function encodeSentence(words: string[]): Buffer {
+    const parts: Buffer[] = [];
+    for (const w of words) {
+      const b = Buffer.from(w, 'utf-8');
+      const len = b.length;
+      let lenBuf: Buffer;
+      if (len < 0x80) {
+        lenBuf = Buffer.from([len]);
+      } else if (len < 0x4000) {
+        lenBuf = Buffer.from([(len >> 8) | 0x80, len & 0xff]);
+      } else if (len < 0x200000) {
+        lenBuf = Buffer.from([(len >> 16) | 0xc0, (len >> 8) & 0xff, len & 0xff]);
+      } else if (len < 0x10000000) {
+        lenBuf = Buffer.from([(len >> 24) | 0xe0, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff]);
+      } else {
+        lenBuf = Buffer.from([0xf0, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff]);
+      }
+      parts.push(lenBuf, b);
+    }
+    parts.push(Buffer.from([0])); // End of sentence
+    return Buffer.concat(parts);
+  }
+
+  function parseSentencesFromBuffer(buffer: Buffer): { sentences: string[][]; remaining: Buffer } {
+    const sentences: string[][] = [];
+    let offset = 0;
+
+    while (offset < buffer.length) {
+      let tempOffset = offset;
+      const words: string[] = [];
+      let sentenceComplete = false;
+
+      while (tempOffset < buffer.length) {
+        const firstByte = buffer[tempOffset];
+        if (firstByte === 0) {
+          tempOffset += 1;
+          sentenceComplete = true;
+          break;
+        }
+
+        let wordLen = 0;
+        let headerLen = 0;
+        if ((firstByte & 0x80) === 0x00) {
+          wordLen = firstByte;
+          headerLen = 1;
+        } else if ((firstByte & 0xc0) === 0x80) {
+          if (tempOffset + 1 >= buffer.length) break;
+          wordLen = ((firstByte & 0x3f) << 8) | buffer[tempOffset + 1];
+          headerLen = 2;
+        } else if ((firstByte & 0xe0) === 0xc0) {
+          if (tempOffset + 2 >= buffer.length) break;
+          wordLen = ((firstByte & 0x1f) << 16) | (buffer[tempOffset + 1] << 8) | buffer[tempOffset + 2];
+          headerLen = 3;
+        } else if ((firstByte & 0xf0) === 0xe0) {
+          if (tempOffset + 3 >= buffer.length) break;
+          wordLen = ((firstByte & 0x0f) << 24) | (buffer[tempOffset + 1] << 16) | (buffer[tempOffset + 2] << 8) | buffer[tempOffset + 3];
+          headerLen = 4;
+        } else {
+          if (tempOffset + 4 >= buffer.length) break;
+          wordLen = (buffer[tempOffset + 1] << 24) | (buffer[tempOffset + 2] << 16) | (buffer[tempOffset + 3] << 8) | buffer[tempOffset + 4];
+          headerLen = 5;
+        }
+
+        if (tempOffset + headerLen + wordLen > buffer.length) {
+          break; // Incomplete word in buffer
+        }
+
+        const word = buffer.toString('utf-8', tempOffset + headerLen, tempOffset + headerLen + wordLen);
+        words.push(word);
+        tempOffset += headerLen + wordLen;
+      }
+
+      if (sentenceComplete) {
+        sentences.push(words);
+        offset = tempOffset;
+      } else {
+        break;
+      }
+    }
+
+    return { sentences, remaining: Buffer.from(buffer.subarray(offset)) };
+  }
+
+  async function queryRouterOsApi(options: {
+    hostname: string;
+    port: number;
+    username?: string;
+    password?: string;
+    timeoutMs?: number;
+  }): Promise<{
+    success: boolean;
+    content: string;
+    version: string;
+    identity: string;
+    model: string;
+    error?: string;
+  }> {
+    return new Promise((resolve, reject) => {
+      const port = options.port || 8728;
+      const timeout = options.timeoutMs || 10000;
+      const socket = net.createConnection({ host: options.hostname, port });
+
+      let rxBuf: any = Buffer.alloc(0);
+      let state: 'CONNECT' | 'LOGIN_SENT' | 'CHALLENGE_SENT' | 'COMMANDS' | 'DONE' = 'CONNECT';
+      let challengeHex = '';
+      let currentCmdIndex = 0;
+
+      const commandsToRun = [
+        { cmd: '/system/resource/print', tag: 'resource' },
+        { cmd: '/system/identity/print', tag: 'identity' },
+        { cmd: '/interface/bridge/print', tag: 'bridge' },
+        { cmd: '/interface/vlan/print', tag: 'vlan' },
+        { cmd: '/interface/bridge/port/print', tag: 'bridge_port' },
+        { cmd: '/interface/bridge/vlan/print', tag: 'bridge_vlan' },
+        { cmd: '/interface/list/print', tag: 'iface_list' },
+        { cmd: '/interface/list/member/print', tag: 'iface_member' },
+        { cmd: '/interface/print', tag: 'interface' },
+        { cmd: '/ip/pool/print', tag: 'pool' },
+        { cmd: '/ip/dhcp-server/print', tag: 'dhcp_server' },
+        { cmd: '/ip/dhcp-server/network/print', tag: 'dhcp_network' },
+        { cmd: '/ip/dhcp-server/lease/print', tag: 'dhcp_lease' },
+        { cmd: '/ip/dhcp-client/print', tag: 'dhcp_client' },
+        { cmd: '/ip/address/print', tag: 'address' },
+        { cmd: '/ip/route/print', tag: 'route' },
+        { cmd: '/ip/firewall/filter/print', tag: 'filter' },
+        { cmd: '/ip/firewall/nat/print', tag: 'nat' },
+        { cmd: '/ip/firewall/mangle/print', tag: 'mangle' },
+        { cmd: '/ip/firewall/address-list/print', tag: 'address_list' },
+        { cmd: '/ip/dns/print', tag: 'dns' },
+        { cmd: '/ppp/profile/print', tag: 'ppp_profile' },
+        { cmd: '/ppp/secret/print', tag: 'ppp_secret' }
+      ];
+
+      const results: Record<string, any[]> = {};
+      let identity = 'MikroTik';
+      let version = '6.x';
+      let model = 'RouterOS';
+
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error(`Timeout (${timeout}ms) saat menghubungi MikroTik via API port ${port}`));
+      }, timeout);
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.removeAllListeners();
+        socket.end();
+        socket.destroy();
+      };
+
+      socket.on('error', (err) => {
+        cleanup();
+        reject(new Error(`Koneksi RouterOS API port ${port} gagal: ${err.message}`));
+      });
+
+      socket.on('connect', () => {
+        state = 'LOGIN_SENT';
+        socket.write(encodeSentence(['/login']));
+      });
+
+      socket.on('data', (chunk) => {
+        rxBuf = Buffer.concat([rxBuf, chunk]);
+        const parsed = parseSentencesFromBuffer(rxBuf);
+        rxBuf = parsed.remaining;
+
+        for (const sentence of parsed.sentences) {
+          const sentenceType = sentence[0];
+
+          if (state === 'LOGIN_SENT') {
+            if (sentenceType === '!done') {
+              const retWord = sentence.find(w => w.startsWith('=ret='));
+              if (retWord) {
+                // Challenge-based MD5 authentication (RouterOS 6.42 and below)
+                challengeHex = retWord.slice(5);
+                const chal = Buffer.from(challengeHex, 'hex');
+                const zero = Buffer.from([0]);
+                const pwd = Buffer.from(options.password || '', 'utf-8');
+                const hash = crypto.createHash('md5').update(Buffer.concat([zero, pwd, chal])).digest('hex');
+
+                state = 'CHALLENGE_SENT';
+                socket.write(encodeSentence([
+                  '/login',
+                  `=name=${options.username || 'admin'}`,
+                  `=response=00${hash}`
+                ]));
+              } else {
+                // Direct login accepted
+                state = 'COMMANDS';
+                runNextCommand();
+              }
+            } else if (sentenceType === '!trap') {
+              // Newer plain login (RouterOS 6.43+ and 7.x)
+              state = 'CHALLENGE_SENT';
+              socket.write(encodeSentence([
+                '/login',
+                `=name=${options.username || 'admin'}`,
+                `=password=${options.password || ''}`
+              ]));
+            }
+          } else if (state === 'CHALLENGE_SENT') {
+            if (sentenceType === '!done') {
+              state = 'COMMANDS';
+              runNextCommand();
+            } else if (sentenceType === '!trap') {
+              const msgWord = sentence.find(w => w.startsWith('=message='));
+              const errorMsg = msgWord ? msgWord.slice(9) : 'Login RouterOS API ditolak';
+              cleanup();
+              reject(new Error(`Autentikasi RouterOS API port ${port} gagal: ${errorMsg}. Periksa login admin router.`));
+              return;
+            }
+          } else if (state === 'COMMANDS') {
+            const currentTag = commandsToRun[currentCmdIndex]?.tag;
+            if (!results[currentTag]) results[currentTag] = [];
+
+            if (sentenceType === '!re') {
+              const item: Record<string, string> = {};
+              for (const word of sentence.slice(1)) {
+                if (word.startsWith('=')) {
+                  const eqIdx = word.indexOf('=', 1);
+                  if (eqIdx !== -1) {
+                    item[word.slice(1, eqIdx)] = word.slice(eqIdx + 1);
+                  } else {
+                    item[word.slice(1)] = 'true';
+                  }
+                }
+              }
+              results[currentTag].push(item);
+            } else if (sentenceType === '!done' || sentenceType === '!trap') {
+              currentCmdIndex++;
+              if (currentCmdIndex < commandsToRun.length) {
+                runNextCommand();
+              } else {
+                cleanup();
+                buildConfig();
+              }
+            }
+          }
+        }
+      });
+
+      function runNextCommand() {
+        if (currentCmdIndex < commandsToRun.length) {
+          socket.write(encodeSentence([commandsToRun[currentCmdIndex].cmd]));
+        }
+      }
+
+      function buildConfig() {
+        if (results.identity && results.identity[0]?.name) {
+          identity = results.identity[0].name;
+        }
+        if (results.resource && results.resource[0]) {
+          if (results.resource[0].version) version = results.resource[0].version;
+          if (results.resource[0]['board-name']) model = results.resource[0]['board-name'];
+        }
+
+        const lines: string[] = [
+          `# MikroTik RouterOS ${version}`,
+          `# identity = ${identity}`,
+          `# model = ${model}`,
+          `# generated by MikroTik Auto Backup Manager via RouterOS API (v6/v7)`,
+          `# timestamp = ${new Date().toISOString()}`,
+          ''
+        ];
+
+        const formatProps = (obj: any, preferredKeys?: string[]) => {
+          const ignored = new Set(['.id', '.nextid', 'running', 'actual-mtu', 'dynamic', 'invalid', 'bytes', 'packets']);
+          const keys = preferredKeys
+            ? [...preferredKeys.filter(k => k in obj), ...Object.keys(obj).filter(k => !preferredKeys.includes(k))]
+            : Object.keys(obj);
+
+          const p: string[] = [];
+          for (const k of keys) {
+            if (ignored.has(k)) continue;
+            const v = obj[k];
+            if (v === undefined || v === null || v === '') continue;
+            if (v === 'true' || v === true) p.push(`${k}=yes`);
+            else if (v === 'false' || v === false) p.push(`${k}=no`);
+            else if (typeof v === 'string' && (v.includes(' ') || v.includes(';') || v.includes('"') || v === '')) {
+              p.push(`${k}="${v.replace(/"/g, '\\"')}"`);
+            } else {
+              p.push(`${k}=${v}`);
+            }
+          }
+          return p.join(' ');
+        };
+
+        // 1. /interface bridge
+        if (results.bridge?.length > 0) {
+          lines.push('/interface bridge');
+          for (const b of results.bridge) {
+            if (b.dynamic === 'true') continue;
+            lines.push(`add ${formatProps(b, ['name', 'vlan-filtering', 'comment', 'mtu'])}`);
+          }
+          lines.push('');
+        }
+
+        // 2. /interface vlan (VLAN Interfaces!)
+        if (results.vlan?.length > 0) {
+          lines.push('/interface vlan');
+          for (const v of results.vlan) {
+            if (v.dynamic === 'true') continue;
+            lines.push(`add ${formatProps(v, ['name', 'vlan-id', 'interface', 'comment', 'disabled'])}`);
+          }
+          lines.push('');
+        }
+
+        // 3. /interface bridge port
+        if (results.bridge_port?.length > 0) {
+          lines.push('/interface bridge port');
+          for (const bp of results.bridge_port) {
+            if (bp.dynamic === 'true') continue;
+            lines.push(`add ${formatProps(bp, ['bridge', 'interface', 'pvid', 'frame-types', 'ingress-filtering', 'comment', 'disabled'])}`);
+          }
+          lines.push('');
+        }
+
+        // 4. /interface bridge vlan
+        if (results.bridge_vlan?.length > 0) {
+          lines.push('/interface bridge vlan');
+          for (const bv of results.bridge_vlan) {
+            if (bv.dynamic === 'true') continue;
+            lines.push(`add ${formatProps(bv, ['bridge', 'vlan-ids', 'tagged', 'untagged', 'comment'])}`);
+          }
+          lines.push('');
+        }
+
+        // 5. /interface list
+        if (results.iface_list?.length > 0) {
+          const customLists = results.iface_list.filter((l: any) => !['all', 'none', 'dynamic'].includes(l.name));
+          if (customLists.length > 0) {
+            lines.push('/interface list');
+            for (const l of customLists) {
+              lines.push(`add name="${l.name}" ${l.comment ? `comment="${l.comment}"` : ''}`);
+            }
+            lines.push('');
+          }
+        }
+
+        // 6. /interface list member
+        if (results.iface_member?.length > 0) {
+          lines.push('/interface list member');
+          for (const m of results.iface_member) {
+            if (m.dynamic === 'true') continue;
+            lines.push(`add interface="${m.interface}" list="${m.list}"`);
+          }
+          lines.push('');
+        }
+
+        // 7. /ip pool
+        if (results.pool?.length > 0) {
+          lines.push('/ip pool');
+          for (const p of results.pool) {
+            lines.push(`add name="${p.name}" ranges="${p.ranges}" ${p['next-pool'] ? `next-pool="${p['next-pool']}"` : ''}`);
+          }
+          lines.push('');
+        }
+
+        // 8. /ip dhcp-server (DHCP Server!)
+        if (results.dhcp_server?.length > 0) {
+          lines.push('/ip dhcp-server');
+          for (const ds of results.dhcp_server) {
+            if (ds.dynamic === 'true') continue;
+            lines.push(`add ${formatProps(ds, ['name', 'interface', 'address-pool', 'lease-time', 'disabled', 'comment'])}`);
+          }
+          lines.push('');
+        }
+
+        // 9. /ip dhcp-server network
+        if (results.dhcp_network?.length > 0) {
+          lines.push('/ip dhcp-server network');
+          for (const dn of results.dhcp_network) {
+            lines.push(`add ${formatProps(dn, ['address', 'gateway', 'dns-server', 'domain', 'comment'])}`);
+          }
+          lines.push('');
+        }
+
+        // 10. /ip dhcp-server lease (Static leases only)
+        if (results.dhcp_lease?.length > 0) {
+          const staticLeases = results.dhcp_lease.filter((l: any) => l.dynamic !== 'true' && l.dynamic !== true);
+          if (staticLeases.length > 0) {
+            lines.push('/ip dhcp-server lease');
+            for (const dl of staticLeases) {
+              lines.push(`add ${formatProps(dl, ['address', 'mac-address', 'server', 'comment', 'disabled'])}`);
+            }
+            lines.push('');
+          }
+        }
+
+        // 11. /ip dhcp-client
+        if (results.dhcp_client?.length > 0) {
+          lines.push('/ip dhcp-client');
+          for (const dc of results.dhcp_client) {
+            lines.push(`add ${formatProps(dc, ['interface', 'add-default-route', 'use-peer-dns'])}`);
+          }
+          lines.push('');
+        }
+
+        // 12. /ip address
+        if (results.address?.length > 0) {
+          const staticIps = results.address.filter((i: any) => i.dynamic !== 'true' && !i.interface?.includes('<'));
+          if (staticIps.length > 0) {
+            lines.push('/ip address');
+            for (const i of staticIps) {
+              lines.push(`add address="${i.address}" interface="${i.interface}" network="${i.network || ''}" ${i.comment ? `comment="${i.comment}"` : ''}`);
+            }
+            lines.push('');
+          }
+        }
+
+        // 13. /ip route
+        if (results.route?.length > 0) {
+          const staticRoutes = results.route.filter((r: any) => r.dynamic !== 'true' && r.connect !== 'true' && !r.gateway?.includes('<'));
+          if (staticRoutes.length > 0) {
+            lines.push('/ip route');
+            for (const r of staticRoutes) {
+              lines.push(`add dst-address="${r['dst-address'] || '0.0.0.0/0'}" gateway="${r.gateway || ''}" ${r.distance ? `distance=${r.distance}` : ''}`);
+            }
+            lines.push('');
+          }
+        }
+
+        // 14. /ip firewall filter
+        if (results.filter?.length > 0) {
+          const staticFilters = results.filter.filter((f: any) => f.dynamic !== 'true');
+          if (staticFilters.length > 0) {
+            lines.push('/ip firewall filter');
+            for (const f of staticFilters) {
+              lines.push(`add ${formatProps(f)}`);
+            }
+            lines.push('');
+          }
+        }
+
+        // 15. /ip firewall nat
+        if (results.nat?.length > 0) {
+          const staticNats = results.nat.filter((n: any) => n.dynamic !== 'true');
+          if (staticNats.length > 0) {
+            lines.push('/ip firewall nat');
+            for (const n of staticNats) {
+              lines.push(`add ${formatProps(n)}`);
+            }
+            lines.push('');
+          }
+        }
+
+        // 16. /ip firewall mangle
+        if (results.mangle?.length > 0) {
+          const staticMangles = results.mangle.filter((m: any) => m.dynamic !== 'true');
+          if (staticMangles.length > 0) {
+            lines.push('/ip firewall mangle');
+            for (const m of staticMangles) {
+              lines.push(`add ${formatProps(m)}`);
+            }
+            lines.push('');
+          }
+        }
+
+        // 17. /ip firewall address-list
+        if (results.address_list?.length > 0) {
+          const staticLists = results.address_list.filter((al: any) => al.dynamic !== 'true');
+          if (staticLists.length > 0) {
+            lines.push('/ip firewall address-list');
+            for (const al of staticLists) {
+              lines.push(`add list="${al.list}" address="${al.address}" ${al.comment ? `comment="${al.comment}"` : ''}`);
+            }
+            lines.push('');
+          }
+        }
+
+        // 18. /ip dns
+        if (results.dns && results.dns[0]?.servers) {
+          lines.push('/ip dns');
+          lines.push(`set servers="${results.dns[0].servers}" allow-remote-requests="${results.dns[0]['allow-remote-requests'] || 'no'}"`);
+          lines.push('');
+        }
+
+        // 19. /ppp profile & secret
+        if (results.ppp_profile?.length > 0) {
+          const customP = results.ppp_profile.filter((p: any) => !['default', 'default-encryption'].includes(p.name));
+          if (customP.length > 0) {
+            lines.push('/ppp profile');
+            for (const p of customP) lines.push(`add name="${p.name}"`);
+            lines.push('');
+          }
+        }
+        if (results.ppp_secret?.length > 0) {
+          lines.push('/ppp secret');
+          for (const s of results.ppp_secret) {
+            lines.push(`add name="${s.name}" service="${s.service || 'any'}" profile="${s.profile || 'default'}" ${s.password ? `password="${s.password}"` : ''}`);
+          }
+          lines.push('');
+        }
+
+        const rawRsc = lines.join('\n');
+        resolve({
+          success: true,
+          content: filterStaticOnlyRsc(rawRsc),
+          version,
+          identity,
+          model
+        });
+      }
+    });
+  }
+
   // Function to pull real configuration from MikroTik RouterOS v7 device
   async function pullRealMikrotikConfig(device: RouterDevice): Promise<{
     content: string;
@@ -1675,7 +2286,32 @@ function filterStaticOnlyRsc(content: string): string {
     model?: string;
     activePort?: number;
   }> {
-    // Determine candidate ports to probe (user port first with and without TLS, then standard 443, 80, 444, 8080)
+    // If device is configured for RouterOS API (v6 or port 8728), pull directly via RouterOS API protocol
+    if (device.protocol === 'api_binary' || device.port === 8728 || device.osVersion === 'v6') {
+      console.log(`[API Pull] Menghubungi MikroTik ${device.name} (${device.ipHost}) via RouterOS API port ${device.port || 8728} (Mode RouterOS v6/v7)...`);
+      try {
+        const apiRes = await queryRouterOsApi({
+          hostname: device.ipHost,
+          port: device.port || 8728,
+          username: device.username,
+          password: device.password,
+          timeoutMs: 12000
+        });
+        if (apiRes.success && apiRes.content) {
+          return {
+            content: apiRes.content,
+            version: apiRes.version,
+            identity: apiRes.identity,
+            model: apiRes.model,
+            activePort: device.port || 8728
+          };
+        }
+      } catch (err: any) {
+        console.warn(`[API Pull] Gagal menarik via API port ${device.port || 8728}:`, err.message);
+      }
+    }
+
+    // Determine candidate ports to probe for REST API (port 443, 80, 444, 8080)
     const candidates: Array<{ port: number; useTls: boolean }> = [];
     const isConfiguredTls = device.port === 444 || device.port === 443 || device.useTls;
     candidates.push({ port: device.port, useTls: isConfiguredTls });
@@ -1743,7 +2379,30 @@ function filterStaticOnlyRsc(content: string): string {
     }
 
     if (!connected) {
-      throw new Error(`Tidak dapat terhubung ke MikroTik ${device.ipHost} pada port ${candidates.map(c => c.port).join(', ')}. Detail: ${lastError || 'Koneksi ditolak/timeout'}.`);
+      // Auto-fallback: If REST API ports are closed, try RouterOS API on port 8728 (standard for RouterOS v6 & v7)
+      console.log(`[Pull Fallback] REST API tidak merespons. Mencoba RouterOS API port 8728 untuk ${device.name}...`);
+      try {
+        const apiRes = await queryRouterOsApi({
+          hostname: device.ipHost,
+          port: 8728,
+          username: device.username,
+          password: device.password,
+          timeoutMs: 10000
+        });
+        if (apiRes.success && apiRes.content) {
+          return {
+            content: apiRes.content,
+            version: apiRes.version,
+            identity: apiRes.identity,
+            model: apiRes.model,
+            activePort: 8728
+          };
+        }
+      } catch (apiErr: any) {
+        console.warn(`[Pull Fallback] Percobaan port 8728 juga gagal:`, apiErr.message);
+      }
+
+      throw new Error(`Tidak dapat terhubung ke MikroTik ${device.ipHost} pada port REST API (${candidates.map(c => c.port).join(', ')}) maupun port 8728 API. Detail: ${lastError || 'Koneksi ditolak/timeout'}.`);
     }
 
     // Update device port in memory if alternative worked
@@ -1957,264 +2616,302 @@ function filterStaticOnlyRsc(content: string): string {
           ''
         ];
 
-        // Pull interfaces (Only static interfaces)
-        const ifacesRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/interface',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 8000
-        });
-        if (ifacesRes.status === 200) {
+        const fetchEndpoint = async (endpointPath: string): Promise<any[] | any | null> => {
           try {
-            const ifaces = JSON.parse(ifacesRes.data);
-            if (Array.isArray(ifaces) && ifaces.length > 0) {
-              const staticIfaces = ifaces.filter((item: any) => {
-                if (item.dynamic === 'true' || item.dynamic === true || item.dynamic === 'yes') return false;
-                if (item.name && (item.name.startsWith('<') || item.name.includes('<'))) return false;
-                if (['l2tp-in', 'pptp-in', 'sstp-in', 'ovpn-in'].includes(item.type)) return false;
-                return true;
-              });
-
-              if (staticIfaces.length > 0) {
-                parts.push('/interface');
-                staticIfaces.forEach((item: any) => {
-                  const props = Object.entries(item)
-                    .filter(([k]) => !k.startsWith('.') && k !== 'running' && k !== 'actual-mtu')
-                    .map(([k, v]) => `${k}="${v}"`)
-                    .join(' ');
-                  parts.push(`add ${props}`);
-                });
-                parts.push('');
+            const res = await mikrotikRequest({
+              hostname: device.ipHost,
+              port: activeCandidate.port,
+              path: endpointPath,
+              method: 'GET',
+              username: device.username,
+              password: device.password,
+              useTls: activeCandidate.useTls,
+              timeoutMs: 7000
+            });
+            if (res.status === 200 && res.data) {
+              try {
+                return JSON.parse(res.data);
+              } catch {
+                return null;
               }
             }
-          } catch {}
+          } catch {
+            return null;
+          }
+          return null;
+        };
+
+        const formatProps = (obj: any, preferredKeys?: string[]) => {
+          const ignored = new Set(['.id', '.nextid', 'running', 'actual-mtu', 'dynamic', 'invalid', 'bytes', 'packets', 'rx-byte', 'tx-byte']);
+          const keys = preferredKeys
+            ? [...preferredKeys.filter(k => k in obj), ...Object.keys(obj).filter(k => !preferredKeys.includes(k))]
+            : Object.keys(obj);
+
+          const p: string[] = [];
+          for (const k of keys) {
+            if (ignored.has(k)) continue;
+            const v = obj[k];
+            if (v === undefined || v === null || v === '') continue;
+            if (v === 'true' || v === true) p.push(`${k}=yes`);
+            else if (v === 'false' || v === false) p.push(`${k}=no`);
+            else if (typeof v === 'string' && (v.includes(' ') || v.includes(';') || v.includes('"') || v === '')) {
+              p.push(`${k}="${v.replace(/"/g, '\\"')}"`);
+            } else {
+              p.push(`${k}=${v}`);
+            }
+          }
+          return p.join(' ');
+        };
+
+        // 1. /interface bridge
+        const bridges = await fetchEndpoint('/rest/interface/bridge');
+        if (Array.isArray(bridges) && bridges.length > 0) {
+          parts.push('/interface bridge');
+          for (const b of bridges) {
+            if (b.dynamic === 'true' || b.dynamic === true) continue;
+            parts.push(`add ${formatProps(b, ['name', 'vlan-filtering', 'comment', 'mtu'])}`);
+          }
+          parts.push('');
         }
 
-        // Pull IP Addresses (Only static IP addresses, ignore dynamic VPN client addresses)
-        const ipRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/ip/address',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 8000
-        });
-        if (ipRes.status === 200) {
-          try {
-            const ips = JSON.parse(ipRes.data);
-            if (Array.isArray(ips) && ips.length > 0) {
-              const staticIps = ips.filter((item: any) => {
-                if (item.dynamic === 'true' || item.dynamic === true || item.dynamic === 'yes') return false;
-                if (item.interface && (item.interface.startsWith('<') || item.interface.includes('<'))) return false;
-                return true;
-              });
-
-              if (staticIps.length > 0) {
-                parts.push('/ip address');
-                staticIps.forEach((item: any) => {
-                  parts.push(`add address=${item.address} interface=${item.interface} network=${item.network || ''}`);
-                });
-                parts.push('');
-              }
-            }
-          } catch {}
+        // 2. /interface vlan (CRITICAL FOR USER!)
+        const vlans = await fetchEndpoint('/rest/interface/vlan');
+        if (Array.isArray(vlans) && vlans.length > 0) {
+          parts.push('/interface vlan');
+          for (const v of vlans) {
+            if (v.dynamic === 'true' || v.dynamic === true) continue;
+            parts.push(`add ${formatProps(v, ['name', 'vlan-id', 'interface', 'comment', 'disabled'])}`);
+          }
+          parts.push('');
         }
 
-        // Pull IP Routes (Only static routes, ignore dynamic VPN & DAC connected routes)
-        const routeRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/ip/route',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 8000
-        });
-        if (routeRes.status === 200) {
-          try {
-            const routes = JSON.parse(routeRes.data);
-            if (Array.isArray(routes) && routes.length > 0) {
-              const staticRoutes = routes.filter((item: any) => {
-                if (item.dynamic === 'true' || item.dynamic === true || item.dynamic === 'yes') return false;
-                if (item.connect === 'true' || item.connect === true || item.connect === 'yes') return false;
-                if (item.gateway && (item.gateway.startsWith('<') || item.gateway.includes('<'))) return false;
-                return true;
-              });
-
-              if (staticRoutes.length > 0) {
-                parts.push('/ip route');
-                staticRoutes.forEach((item: any) => {
-                  parts.push(`add dst-address=${item['dst-address'] || '0.0.0.0/0'} gateway=${item.gateway || ''}`);
-                });
-                parts.push('');
-              }
-            }
-          } catch {}
+        // 3. /interface bridge port
+        const bridgePorts = await fetchEndpoint('/rest/interface/bridge/port');
+        if (Array.isArray(bridgePorts) && bridgePorts.length > 0) {
+          parts.push('/interface bridge port');
+          for (const bp of bridgePorts) {
+            if (bp.dynamic === 'true' || bp.dynamic === true) continue;
+            parts.push(`add ${formatProps(bp, ['bridge', 'interface', 'pvid', 'frame-types', 'ingress-filtering', 'comment', 'disabled'])}`);
+          }
+          parts.push('');
         }
 
-        // Pull IP Firewall Filter (Static only)
-        const fwRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/ip/firewall/filter',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 8000
-        });
-        if (fwRes.status === 200) {
-          try {
-            const fws = JSON.parse(fwRes.data);
-            if (Array.isArray(fws) && fws.length > 0) {
-              const staticFws = fws.filter((item: any) => item.dynamic !== 'true' && item.dynamic !== true);
-              if (staticFws.length > 0) {
-                parts.push('/ip firewall filter');
-                staticFws.forEach((item: any) => {
-                  const props = Object.entries(item)
-                    .filter(([k]) => !k.startsWith('.') && k !== 'bytes' && k !== 'packets')
-                    .map(([k, v]) => `${k}="${v}"`)
-                    .join(' ');
-                  parts.push(`add ${props}`);
-                });
-                parts.push('');
-              }
-            }
-          } catch {}
+        // 4. /interface bridge vlan
+        const bridgeVlans = await fetchEndpoint('/rest/interface/bridge/vlan');
+        if (Array.isArray(bridgeVlans) && bridgeVlans.length > 0) {
+          parts.push('/interface bridge vlan');
+          for (const bv of bridgeVlans) {
+            if (bv.dynamic === 'true' || bv.dynamic === true) continue;
+            parts.push(`add ${formatProps(bv, ['bridge', 'vlan-ids', 'tagged', 'untagged', 'comment'])}`);
+          }
+          parts.push('');
         }
 
-        // Pull IP Firewall NAT (Static only)
-        const natRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/ip/firewall/nat',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 8000
-        });
-        if (natRes.status === 200) {
-          try {
-            const nats = JSON.parse(natRes.data);
-            if (Array.isArray(nats) && nats.length > 0) {
-              const staticNats = nats.filter((item: any) => item.dynamic !== 'true' && item.dynamic !== true);
-              if (staticNats.length > 0) {
-                parts.push('/ip firewall nat');
-                staticNats.forEach((item: any) => {
-                  const props = Object.entries(item)
-                    .filter(([k]) => !k.startsWith('.') && k !== 'bytes' && k !== 'packets')
-                    .map(([k, v]) => `${k}="${v}"`)
-                    .join(' ');
-                  parts.push(`add ${props}`);
-                });
-                parts.push('');
-              }
+        // 5. /interface list
+        const ifaceLists = await fetchEndpoint('/rest/interface/list');
+        if (Array.isArray(ifaceLists) && ifaceLists.length > 0) {
+          const customLists = ifaceLists.filter((l: any) => !['all', 'none', 'dynamic'].includes(l.name));
+          if (customLists.length > 0) {
+            parts.push('/interface list');
+            for (const l of customLists) {
+              parts.push(`add name="${l.name}" ${l.comment ? `comment="${l.comment}"` : ''}`);
             }
-          } catch {}
+            parts.push('');
+          }
         }
 
-        // Pull IP DNS
-        const dnsRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/ip/dns',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 6000
-        });
-        if (dnsRes.status === 200) {
-          try {
-            const dns = JSON.parse(dnsRes.data);
-            if (dns?.servers) {
-              parts.push('/ip dns');
-              parts.push(`set servers="${dns.servers}" allow-remote-requests="${dns['allow-remote-requests'] || 'no'}"`);
-              parts.push('');
-            }
-          } catch {}
+        // 6. /interface list member
+        const listMembers = await fetchEndpoint('/rest/interface/list/member');
+        if (Array.isArray(listMembers) && listMembers.length > 0) {
+          parts.push('/interface list member');
+          for (const m of listMembers) {
+            if (m.dynamic === 'true' || m.dynamic === true) continue;
+            parts.push(`add interface="${m.interface}" list="${m.list}"`);
+          }
+          parts.push('');
         }
 
-        // Pull IP Pools
-        const poolRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/ip/pool',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 6000
-        });
-        if (poolRes.status === 200) {
-          try {
-            const pools = JSON.parse(poolRes.data);
-            if (Array.isArray(pools) && pools.length > 0) {
-              parts.push('/ip pool');
-              pools.forEach((item: any) => {
-                parts.push(`add name="${item.name}" ranges="${item.ranges}"`);
-              });
-              parts.push('');
-            }
-          } catch {}
+        // 7. /ip pool
+        const pools = await fetchEndpoint('/rest/ip/pool');
+        if (Array.isArray(pools) && pools.length > 0) {
+          parts.push('/ip pool');
+          for (const p of pools) {
+            parts.push(`add name="${p.name}" ranges="${p.ranges}" ${p['next-pool'] ? `next-pool="${p['next-pool']}"` : ''}`);
+          }
+          parts.push('');
         }
 
-        // Pull PPP Profiles & Secrets (VPN Configuration)
-        const pppProfRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/ppp/profile',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 6000
-        });
-        if (pppProfRes.status === 200) {
-          try {
-            const profs = JSON.parse(pppProfRes.data);
-            if (Array.isArray(profs) && profs.length > 0) {
-              const customProfs = profs.filter((p: any) => p.name !== 'default' && p.name !== 'default-encryption');
-              if (customProfs.length > 0) {
-                parts.push('/ppp profile');
-                customProfs.forEach((p: any) => {
-                  parts.push(`add name="${p.name}" ${p['local-address'] ? `local-address="${p['local-address']}"` : ''} ${p['remote-address'] ? `remote-address="${p['remote-address']}"` : ''}`);
-                });
-                parts.push('');
-              }
-            }
-          } catch {}
+        // 8. /ip dhcp-server (CRITICAL FOR USER!)
+        const dhcpServers = await fetchEndpoint('/rest/ip/dhcp-server');
+        if (Array.isArray(dhcpServers) && dhcpServers.length > 0) {
+          parts.push('/ip dhcp-server');
+          for (const ds of dhcpServers) {
+            if (ds.dynamic === 'true' || ds.dynamic === true) continue;
+            parts.push(`add ${formatProps(ds, ['name', 'interface', 'address-pool', 'lease-time', 'disabled', 'comment'])}`);
+          }
+          parts.push('');
         }
 
-        const pppSecRes = await mikrotikRequest({
-          hostname: device.ipHost,
-          port: activeCandidate.port,
-          path: '/rest/ppp/secret',
-          method: 'GET',
-          username: device.username,
-          password: device.password,
-          useTls: activeCandidate.useTls,
-          timeoutMs: 6000
-        });
-        if (pppSecRes.status === 200) {
-          try {
-            const secrets = JSON.parse(pppSecRes.data);
-            if (Array.isArray(secrets) && secrets.length > 0) {
-              parts.push('/ppp secret');
-              secrets.forEach((s: any) => {
-                parts.push(`add name="${s.name}" service="${s.service || 'any'}" profile="${s.profile || 'default'}" ${s.password ? `password="${s.password}"` : ''} ${s['local-address'] ? `local-address="${s['local-address']}"` : ''} ${s['remote-address'] ? `remote-address="${s['remote-address']}"` : ''}`);
-              });
-              parts.push('');
+        // 9. /ip dhcp-server network
+        const dhcpNetworks = await fetchEndpoint('/rest/ip/dhcp-server/network');
+        if (Array.isArray(dhcpNetworks) && dhcpNetworks.length > 0) {
+          parts.push('/ip dhcp-server network');
+          for (const dn of dhcpNetworks) {
+            parts.push(`add ${formatProps(dn, ['address', 'gateway', 'dns-server', 'domain', 'comment'])}`);
+          }
+          parts.push('');
+        }
+
+        // 10. /ip dhcp-server lease (Static only)
+        const dhcpLeases = await fetchEndpoint('/rest/ip/dhcp-server/lease');
+        if (Array.isArray(dhcpLeases) && dhcpLeases.length > 0) {
+          const staticLeases = dhcpLeases.filter((l: any) => l.dynamic !== 'true' && l.dynamic !== true);
+          if (staticLeases.length > 0) {
+            parts.push('/ip dhcp-server lease');
+            for (const dl of staticLeases) {
+              parts.push(`add ${formatProps(dl, ['address', 'mac-address', 'server', 'comment', 'disabled'])}`);
             }
-          } catch {}
+            parts.push('');
+          }
+        }
+
+        // 11. /ip dhcp-client
+        const dhcpClients = await fetchEndpoint('/rest/ip/dhcp-client');
+        if (Array.isArray(dhcpClients) && dhcpClients.length > 0) {
+          parts.push('/ip dhcp-client');
+          for (const dc of dhcpClients) {
+            parts.push(`add ${formatProps(dc, ['interface', 'add-default-route', 'use-peer-dns'])}`);
+          }
+          parts.push('');
+        }
+
+        // 12. /ip address
+        const ipAddresses = await fetchEndpoint('/rest/ip/address');
+        if (Array.isArray(ipAddresses) && ipAddresses.length > 0) {
+          const staticIps = ipAddresses.filter((i: any) => i.dynamic !== 'true' && i.dynamic !== true && !i.interface?.includes('<'));
+          if (staticIps.length > 0) {
+            parts.push('/ip address');
+            for (const i of staticIps) {
+              parts.push(`add address="${i.address}" interface="${i.interface}" network="${i.network || ''}" ${i.comment ? `comment="${i.comment}"` : ''}`);
+            }
+            parts.push('');
+          }
+        }
+
+        // 13. /ip route
+        const routes = await fetchEndpoint('/rest/ip/route');
+        if (Array.isArray(routes) && routes.length > 0) {
+          const staticRoutes = routes.filter((r: any) => r.dynamic !== 'true' && r.dynamic !== true && r.connect !== 'true' && !r.gateway?.includes('<'));
+          if (staticRoutes.length > 0) {
+            parts.push('/ip route');
+            for (const r of staticRoutes) {
+              parts.push(`add dst-address="${r['dst-address'] || '0.0.0.0/0'}" gateway="${r.gateway || ''}" ${r.distance ? `distance=${r.distance}` : ''}`);
+            }
+            parts.push('');
+          }
+        }
+
+        // 14. /ip firewall filter
+        const filters = await fetchEndpoint('/rest/ip/firewall/filter');
+        if (Array.isArray(filters) && filters.length > 0) {
+          const staticFilters = filters.filter((f: any) => f.dynamic !== 'true' && f.dynamic !== true);
+          if (staticFilters.length > 0) {
+            parts.push('/ip firewall filter');
+            for (const f of staticFilters) {
+              parts.push(`add ${formatProps(f)}`);
+            }
+            parts.push('');
+          }
+        }
+
+        // 15. /ip firewall nat
+        const nats = await fetchEndpoint('/rest/ip/firewall/nat');
+        if (Array.isArray(nats) && nats.length > 0) {
+          const staticNats = nats.filter((n: any) => n.dynamic !== 'true' && n.dynamic !== true);
+          if (staticNats.length > 0) {
+            parts.push('/ip firewall nat');
+            for (const n of staticNats) {
+              parts.push(`add ${formatProps(n)}`);
+            }
+            parts.push('');
+          }
+        }
+
+        // 16. /ip firewall mangle
+        const mangles = await fetchEndpoint('/rest/ip/firewall/mangle');
+        if (Array.isArray(mangles) && mangles.length > 0) {
+          const staticMangles = mangles.filter((m: any) => m.dynamic !== 'true' && m.dynamic !== true);
+          if (staticMangles.length > 0) {
+            parts.push('/ip firewall mangle');
+            for (const m of staticMangles) {
+              parts.push(`add ${formatProps(m)}`);
+            }
+            parts.push('');
+          }
+        }
+
+        // 17. /ip firewall address-list
+        const addressLists = await fetchEndpoint('/rest/ip/firewall/address-list');
+        if (Array.isArray(addressLists) && addressLists.length > 0) {
+          const staticLists = addressLists.filter((al: any) => al.dynamic !== 'true' && al.dynamic !== true);
+          if (staticLists.length > 0) {
+            parts.push('/ip firewall address-list');
+            for (const al of staticLists) {
+              parts.push(`add list="${al.list}" address="${al.address}" ${al.comment ? `comment="${al.comment}"` : ''}`);
+            }
+            parts.push('');
+          }
+        }
+
+        // 18. /ip dns
+        const dns = await fetchEndpoint('/rest/ip/dns');
+        if (dns && (dns.servers || dns['allow-remote-requests'])) {
+          parts.push('/ip dns');
+          parts.push(`set servers="${dns.servers || ''}" allow-remote-requests="${dns['allow-remote-requests'] || 'no'}"`);
+          parts.push('');
+        }
+
+        // 19. /routing table
+        const routingTables = await fetchEndpoint('/rest/routing/table');
+        if (Array.isArray(routingTables) && routingTables.length > 0) {
+          const customTables = routingTables.filter((t: any) => t.name !== 'main');
+          if (customTables.length > 0) {
+            parts.push('/routing table');
+            for (const t of customTables) {
+              parts.push(`add name="${t.name}" fib=${t.fib === 'true' || t.fib === true ? 'yes' : 'no'}`);
+            }
+            parts.push('');
+          }
+        }
+
+        // 20. /system identity, clock, ntp
+        const sysIdent = await fetchEndpoint('/rest/system/identity');
+        if (sysIdent?.name) {
+          parts.push('/system identity');
+          parts.push(`set name="${sysIdent.name}"`);
+          parts.push('');
+        }
+
+        // 21. /ppp profile & secret
+        const pppProfiles = await fetchEndpoint('/rest/ppp/profile');
+        if (Array.isArray(pppProfiles) && pppProfiles.length > 0) {
+          const customProfs = pppProfiles.filter((p: any) => !['default', 'default-encryption'].includes(p.name));
+          if (customProfs.length > 0) {
+            parts.push('/ppp profile');
+            for (const p of customProfs) {
+              parts.push(`add name="${p.name}" ${p['local-address'] ? `local-address="${p['local-address']}"` : ''} ${p['remote-address'] ? `remote-address="${p['remote-address']}"` : ''}`);
+            }
+            parts.push('');
+          }
+        }
+
+        const pppSecrets = await fetchEndpoint('/rest/ppp/secret');
+        if (Array.isArray(pppSecrets) && pppSecrets.length > 0) {
+          parts.push('/ppp secret');
+          for (const s of pppSecrets) {
+            parts.push(`add name="${s.name}" service="${s.service || 'any'}" profile="${s.profile || 'default'}" ${s.password ? `password="${s.password}"` : ''}`);
+          }
+          parts.push('');
         }
 
         if (parts.length > 6) {
@@ -2414,12 +3111,46 @@ function filterStaticOnlyRsc(content: string): string {
     }
 
     try {
+      const targetPort = Number(port) || 443;
+      const isApiPort = targetPort === 8728 || targetPort === 8729;
+
+      // If user specified port 8728 (or 8729), prioritize testing RouterOS API protocol (v6 & v7)
+      if (isApiPort) {
+        try {
+          const apiRes = await queryRouterOsApi({
+            hostname: ipHost.trim(),
+            port: targetPort,
+            username: username ? username.trim() : 'admin',
+            password: password || '',
+            timeoutMs: 6000
+          });
+          if (apiRes.success) {
+            res.json({
+              success: true,
+              identity: apiRes.identity,
+              version: apiRes.version,
+              model: apiRes.model,
+              port: targetPort,
+              useTls: false,
+              osVersion: apiRes.version?.startsWith('6.') ? 'v6' : 'v7',
+              message: `Berhasil terhubung ke MikroTik ${apiRes.identity} (${apiRes.model}) - RouterOS v${apiRes.version} via API port ${targetPort}!`
+            });
+            return;
+          }
+        } catch (apiErr: any) {
+          res.status(502).json({
+            error: `Gagal terhubung ke MikroTik port ${targetPort} API: ${apiErr.message}`
+          });
+          return;
+        }
+      }
+
       const dummyDevice: RouterDevice = {
         id: 'test',
         name: 'Test Device',
         model: '',
         ipHost: ipHost.trim(),
-        port: Number(port) || 443,
+        port: targetPort,
         protocol: 'rest_api',
         username: username ? username.trim() : 'admin',
         password: password || '',
@@ -2497,8 +3228,32 @@ function filterStaticOnlyRsc(content: string): string {
       }
 
       if (!connected) {
+        // Fallback test via RouterOS API port 8728 (ideal for RouterOS v6 devices without REST API)
+        try {
+          const apiRes = await queryRouterOsApi({
+            hostname: dummyDevice.ipHost,
+            port: 8728,
+            username: dummyDevice.username,
+            password: dummyDevice.password,
+            timeoutMs: 5000
+          });
+          if (apiRes.success) {
+            res.json({
+              success: true,
+              identity: apiRes.identity,
+              version: apiRes.version,
+              model: apiRes.model,
+              port: 8728,
+              useTls: false,
+              osVersion: apiRes.version?.startsWith('6.') ? 'v6' : 'v7',
+              message: `Berhasil terhubung ke MikroTik ${apiRes.identity} (${apiRes.model}) - RouterOS v${apiRes.version} via API port 8728 (RouterOS v6 & v7)!`
+            });
+            return;
+          }
+        } catch (apiErr: any) {}
+
         res.status(502).json({
-          error: `Gagal terhubung ke MikroTik di ${ipHost}:${dummyDevice.port}. ${lastErr || 'Koneksi ditolak atau timeout'}. Pastikan port REST API aktif (service www di port 80 atau www-ssl di port 443 pada menu IP -> Services MikroTik).`
+          error: `Gagal terhubung ke MikroTik di ${ipHost}:${dummyDevice.port}. ${lastErr || 'Koneksi ditolak atau timeout'}. Pastikan port REST API aktif (port 80 / 443 untuk v7) atau port API 8728 aktif (menu IP -> Services untuk v6).`
         });
         return;
       }

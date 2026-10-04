@@ -20,7 +20,8 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
   const [model, setModel] = useState('');
   const [ipHost, setIpHost] = useState('');
   const [port, setPort] = useState(443);
-  const [protocol, setProtocol] = useState<'push_webhook' | 'rest_api'>('push_webhook');
+  const [osVersion, setOsVersion] = useState<'v7' | 'v6'>('v7');
+  const [protocol, setProtocol] = useState<'push_webhook' | 'rest_api' | 'api_binary'>('rest_api');
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
   const [useTls, setUseTls] = useState(true);
@@ -44,7 +45,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
     try {
       const res = await api.testConnection({
         ipHost: ipHost.trim(),
-        port: Number(port) || 443,
+        port: Number(port) || (osVersion === 'v6' ? 8728 : 443),
         useTls,
         username: username.trim() || 'admin',
         password: password || undefined
@@ -56,10 +57,27 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       if (res.identity && !name) {
         setName(res.identity);
       }
+      if (res.version?.startsWith('6.')) {
+        setOsVersion('v6');
+        if (port === 443 || port === 80) setPort(8728);
+      } else if (res.version?.startsWith('7.')) {
+        setOsVersion('v7');
+      }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message || 'Gagal menghubungi router' });
     } finally {
       setTestingConnection(false);
+    }
+  };
+
+  const handleVersionChange = (newVer: 'v7' | 'v6') => {
+    setOsVersion(newVer);
+    if (newVer === 'v6') {
+      if (port === 443 || port === 80) setPort(8728);
+      if (protocol === 'rest_api') setProtocol('api_binary');
+    } else {
+      if (port === 8728) setPort(443);
+      if (protocol === 'api_binary') setProtocol('rest_api');
     }
   };
 
@@ -69,7 +87,8 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       setModel(initialDevice.model || '');
       setIpHost(initialDevice.ipHost);
       setPort(initialDevice.port || 443);
-      setProtocol(initialDevice.protocol === 'rest_api' ? 'rest_api' : 'push_webhook');
+      setOsVersion(initialDevice.osVersion || (initialDevice.port === 8728 ? 'v6' : 'v7'));
+      setProtocol(initialDevice.protocol as any || 'rest_api');
       setUsername(initialDevice.username || 'admin');
       setPassword('');
       setUseTls(initialDevice.useTls !== undefined ? initialDevice.useTls : true);
@@ -82,7 +101,8 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       setModel('');
       setIpHost('192.168.88.1');
       setPort(443);
-      setProtocol('push_webhook');
+      setOsVersion('v7');
+      setProtocol('rest_api');
       setUsername('admin');
       setPassword('');
       setUseTls(true);
@@ -115,8 +135,9 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
         name: name.trim(),
         model: model.trim() || undefined,
         ipHost: ipHost.trim(),
-        port: Number(port) || 443,
+        port: Number(port) || (osVersion === 'v6' ? 8728 : 443),
         protocol,
+        osVersion,
         username: username.trim() || 'admin',
         password: password || undefined,
         useTls,
@@ -231,30 +252,86 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
             </div>
           </div>
 
+          {/* RouterOS Version Selector */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
+              <span>Versi RouterOS MikroTik</span>
+              <span className="text-[11px] text-slate-500 font-normal">Pilih sesuai versi router Anda</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleVersionChange('v7')}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all border flex items-center justify-center space-x-1.5 cursor-pointer ${
+                  osVersion === 'v7'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-2xs'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                }`}
+              >
+                <span>RouterOS v7 (Modern)</span>
+                {osVersion === 'v7' && <Check className="w-3.5 h-3.5 text-blue-600" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleVersionChange('v6')}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all border flex items-center justify-center space-x-1.5 cursor-pointer ${
+                  osVersion === 'v6'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-2xs'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                }`}
+              >
+                <span>RouterOS v6 (CCR / RB Series)</span>
+                {osVersion === 'v6' && <Check className="w-3.5 h-3.5 text-blue-600" />}
+              </button>
+            </div>
+          </div>
+
           {/* Backup Mode / Protocol */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
               <span>Metode Penarikan Backup</span>
-              <span className="text-[11px] text-blue-600 font-bold">Rekomendasi: REST API v7</span>
+              <span className="text-[11px] text-blue-600 font-bold">
+                {osVersion === 'v6' ? 'Rekomendasi: RouterOS API port 8728' : 'Rekomendasi: REST API v7'}
+              </span>
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => setProtocol('rest_api')}
-                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
-                  protocol === 'rest_api'
-                    ? 'border-blue-500 bg-blue-50/70 text-slate-900 shadow-xs'
-                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-900">REST API v7 (Pull Otomatis)</span>
-                  {protocol === 'rest_api' && <Check className="w-4 h-4 text-blue-600" />}
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                  Server menarik langsung seluruh konfigurasi asli (.rsc) pada jadwal yang ditentukan (misal jam 02:00). Tanpa batasan ukuran file.
-                </p>
-              </button>
+              {osVersion === 'v7' ? (
+                <button
+                  type="button"
+                  onClick={() => setProtocol('rest_api')}
+                  className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                    protocol === 'rest_api'
+                      ? 'border-blue-500 bg-blue-50/70 text-slate-900 shadow-xs'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900">REST API v7 (Pull Otomatis)</span>
+                    {protocol === 'rest_api' && <Check className="w-4 h-4 text-blue-600" />}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    Server menarik langsung seluruh konfigurasi asli (.rsc) pada jadwal yang ditentukan. Termasuk VLAN & DHCP Server.
+                  </p>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setProtocol('api_binary')}
+                  className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                    protocol === 'api_binary'
+                      ? 'border-blue-500 bg-blue-50/70 text-slate-900 shadow-xs'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900">RouterOS API v6 (Port 8728)</span>
+                    {protocol === 'api_binary' && <Check className="w-4 h-4 text-blue-600" />}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    Koneksi langsung ke port 8728 API RouterOS v6. Menarik VLAN, DHCP, IP, Firewall secara lengkap.
+                  </p>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -266,11 +343,11 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-900">Webhook Push (Kirim dari Router)</span>
+                  <span className="font-bold text-xs text-slate-900">Webhook Push (Skrip Scheduler)</span>
                   {protocol === 'push_webhook' && <Check className="w-4 h-4 text-blue-600" />}
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                  RouterOS menjalankan skrip scheduler internal dan mengirim file via <code className="text-blue-700 font-semibold">/tool fetch</code>. Cocok jika router di balik NAT/CGNAT.
+                  RouterOS menjalankan skrip internal dan mengirim file via <code className="text-blue-700 font-semibold">/tool fetch</code>. Cocok jika router di balik NAT.
                 </p>
               </button>
             </div>

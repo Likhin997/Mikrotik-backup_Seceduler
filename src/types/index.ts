@@ -4,7 +4,8 @@ export interface RouterDevice {
   model: string;
   ipHost: string;
   port: number;
-  protocol: 'push_webhook' | 'rest_api' | 'ssh_pull';
+  protocol: 'push_webhook' | 'rest_api' | 'ssh_pull' | 'api_binary';
+  osVersion?: 'v7' | 'v6';
   username?: string;
   password?: string;
   useTls: boolean;
@@ -39,6 +40,8 @@ export interface BackupRecord {
   model?: string;
   metadata?: {
     interfacesCount?: number;
+    vlansCount?: number;
+    dhcpCount?: number;
     ipAddressesCount?: number;
     firewallRulesCount?: number;
     routesCount?: number;
@@ -103,6 +106,8 @@ export interface ScriptResponse {
   startTime: string;
   scriptContentRsc: string;
   scriptContentBinary: string;
+  scriptContentRscV6?: string;
+  scriptContentBinaryV6?: string;
 }
 
 export interface AppInfo {

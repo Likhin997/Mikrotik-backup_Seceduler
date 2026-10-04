@@ -73,53 +73,122 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
     return content.split(/\r?\n/);
   }, [content]);
 
-  // Section sections detected
-  const sections = useMemo(() => {
-    const list: { name: string; prefix: string; count: number }[] = [
-      { name: 'Semua', prefix: 'all', count: lines.length },
-      { name: 'Interfaces & VLAN', prefix: '/interface', count: 0 },
-      { name: 'IP Address', prefix: '/ip address', count: 0 },
-      { name: 'DHCP & Pool', prefix: '/ip pool', count: 0 },
-      { name: 'Firewall Filter', prefix: '/ip firewall filter', count: 0 },
-      { name: 'Firewall NAT', prefix: '/ip firewall nat', count: 0 },
-      { name: 'Routing', prefix: '/routing', count: 0 },
-      { name: 'System & Identity', prefix: '/system', count: 0 }
-    ];
+  // Classify each line into its respective section category
+  const parsedLines = useMemo(() => {
+    let currentCategory = 'header';
 
-    lines.forEach(l => {
-      if (staticOnly && isDynamicLine(l)) return;
-      const trimmed = l.trim();
-      if (trimmed.startsWith('/interface')) list[1].count++;
-      if (trimmed.startsWith('/ip address')) list[2].count++;
-      if (trimmed.startsWith('/ip pool') || trimmed.startsWith('/ip dhcp')) list[3].count++;
-      if (trimmed.startsWith('/ip firewall filter')) list[4].count++;
-      if (trimmed.startsWith('/ip firewall nat')) list[5].count++;
-      if (trimmed.startsWith('/routing') || trimmed.startsWith('/ip route')) list[6].count++;
-      if (trimmed.startsWith('/system')) list[7].count++;
+    return lines.map((text, idx) => {
+      const trimmed = text.trim();
+      if (trimmed.startsWith('/')) {
+        const lower = trimmed.toLowerCase();
+        if (
+          lower.startsWith('/interface') ||
+          lower.startsWith('/port')
+        ) {
+          currentCategory = 'interface';
+        } else if (lower.startsWith('/ip address')) {
+          currentCategory = 'ip_address';
+        } else if (
+          lower.startsWith('/ip pool') ||
+          lower.startsWith('/ip dhcp')
+        ) {
+          currentCategory = 'dhcp_pool';
+        } else if (
+          lower.startsWith('/ip firewall filter') ||
+          lower.startsWith('/ip firewall raw')
+        ) {
+          currentCategory = 'firewall_filter';
+        } else if (
+          lower.startsWith('/ip firewall nat') ||
+          lower.startsWith('/ip firewall mangle') ||
+          lower.startsWith('/ip firewall address-list') ||
+          lower.startsWith('/ip firewall layer7-protocol') ||
+          lower.startsWith('/ip firewall service-port')
+        ) {
+          currentCategory = 'firewall_nat';
+        } else if (
+          lower.startsWith('/ip route') ||
+          lower.startsWith('/routing')
+        ) {
+          currentCategory = 'routing';
+        } else if (
+          lower.startsWith('/system') ||
+          lower.startsWith('/ip dns') ||
+          lower.startsWith('/ip service') ||
+          lower.startsWith('/ip neighbor') ||
+          lower.startsWith('/tool') ||
+          lower.startsWith('/user') ||
+          lower.startsWith('/ppp') ||
+          lower.startsWith('/certificate') ||
+          lower.startsWith('/radius') ||
+          lower.startsWith('/snmp')
+        ) {
+          currentCategory = 'system';
+        } else {
+          currentCategory = 'other';
+        }
+      }
+
+      return {
+        text,
+        lineNum: idx + 1,
+        category: currentCategory
+      };
+    });
+  }, [lines]);
+
+  // Section tabs with accurate counts
+  const sections = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: 0,
+      interface: 0,
+      ip_address: 0,
+      dhcp_pool: 0,
+      firewall_filter: 0,
+      firewall_nat: 0,
+      routing: 0,
+      system: 0
+    };
+
+    parsedLines.forEach(item => {
+      if (staticOnly && isDynamicLine(item.text)) return;
+      const trimmed = item.text.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        counts.all++;
+        if (counts[item.category] !== undefined) {
+          counts[item.category]++;
+        }
+      }
     });
 
-    return list;
-  }, [lines, staticOnly]);
+    return [
+      { id: 'all', name: 'Semua', count: counts.all },
+      { id: 'interface', name: 'Interfaces & VLAN', count: counts.interface },
+      { id: 'ip_address', name: 'IP Address', count: counts.ip_address },
+      { id: 'dhcp_pool', name: 'DHCP & Pool', count: counts.dhcp_pool },
+      { id: 'firewall_filter', name: 'Firewall Filter', count: counts.firewall_filter },
+      { id: 'firewall_nat', name: 'Firewall NAT', count: counts.firewall_nat },
+      { id: 'routing', name: 'Routing', count: counts.routing },
+      { id: 'system', name: 'System & DNS', count: counts.system }
+    ];
+  }, [parsedLines, staticOnly]);
 
   const filteredLines = useMemo(() => {
-    return lines
-      .map((text, idx) => ({ text, lineNum: idx + 1 }))
-      .filter(item => {
-        if (staticOnly && isDynamicLine(item.text)) {
-          return false;
-        }
+    return parsedLines.filter(item => {
+      if (staticOnly && isDynamicLine(item.text)) {
+        return false;
+      }
 
-        const matchSearch = searchQuery
-          ? item.text.toLowerCase().includes(searchQuery.toLowerCase())
-          : true;
+      const matchSearch = searchQuery
+        ? item.text.toLowerCase().includes(searchQuery.toLowerCase())
+        : true;
 
-        if (!matchSearch) return false;
-        if (activeSection === 'all') return true;
+      if (!matchSearch) return false;
+      if (activeSection === 'all') return true;
 
-        // Filter by section
-        return item.text.startsWith(activeSection) || activeSection.split(' ').some(k => item.text.includes(k));
-      });
-  }, [lines, searchQuery, activeSection, staticOnly]);
+      return item.category === activeSection;
+    });
+  }, [parsedLines, searchQuery, activeSection, staticOnly]);
 
   if (!isOpen || !backup) return null;
 
@@ -249,17 +318,28 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
 
             <span className="text-slate-300 text-[11px] px-1 hidden lg:inline">|</span>
             <span className="text-slate-500 text-[11px] mr-1 hidden lg:inline font-medium">Seksi:</span>
-            {sections.slice(0, 6).map(sec => (
+            {sections.map(sec => (
               <button
-                key={sec.prefix}
-                onClick={() => setActiveSection(sec.prefix)}
-                className={`px-2.5 py-1 rounded-md text-[11px] whitespace-nowrap transition-colors cursor-pointer ${
-                  activeSection === sec.prefix
+                key={sec.id}
+                onClick={() => setActiveSection(sec.id)}
+                className={`px-2.5 py-1 rounded-md text-[11px] whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+                  activeSection === sec.id
                     ? 'bg-blue-600 text-white font-semibold shadow-2xs'
                     : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
                 }`}
               >
-                {sec.name}
+                <span>{sec.name}</span>
+                {sec.count > 0 && sec.id !== 'all' && (
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+                      activeSection === sec.id
+                        ? 'bg-blue-700/80 text-white'
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {sec.count}
+                  </span>
+                )}
               </button>
             ))}
           </div>

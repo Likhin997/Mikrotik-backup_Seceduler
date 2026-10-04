@@ -15,6 +15,7 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
   onClose
 }) => {
   const [scriptData, setScriptData] = useState<ScriptResponse | null>(null);
+  const [osVersion, setOsVersion] = useState<'v7' | 'v6'>(device?.osVersion === 'v6' ? 'v6' : 'v7');
   const [activeTab, setActiveTab] = useState<'rsc' | 'binary'>('rsc');
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -22,6 +23,7 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
 
   useEffect(() => {
     if (device && isOpen) {
+      if (device.osVersion) setOsVersion(device.osVersion);
       loadScript();
     }
   }, [device, isOpen]);
@@ -42,9 +44,14 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
 
   if (!isOpen || !device) return null;
 
-  const currentCode = activeTab === 'rsc'
-    ? scriptData?.scriptContentRsc || ''
-    : scriptData?.scriptContentBinary || '';
+  const currentCode =
+    osVersion === 'v6'
+      ? activeTab === 'rsc'
+        ? scriptData?.scriptContentRscV6 || scriptData?.scriptContentRsc || ''
+        : scriptData?.scriptContentBinaryV6 || scriptData?.scriptContentBinary || ''
+      : activeTab === 'rsc'
+      ? scriptData?.scriptContentRsc || ''
+      : scriptData?.scriptContentBinary || '';
 
   const handleCopy = () => {
     if (!currentCode) return;
@@ -81,6 +88,38 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
 
         {/* Content */}
         <div className="p-6 space-y-4">
+          {/* OS Version Selector */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div>
+              <span className="text-xs font-bold text-slate-900 block">Pilih Versi MikroTik RouterOS:</span>
+              <span className="text-[11px] text-slate-500">Sintaks perintah ekspor dan upload disesuaikan otomatis</span>
+            </div>
+            <div className="flex space-x-1.5 bg-white p-1 rounded-lg border border-slate-300 shadow-2xs self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setOsVersion('v7')}
+                className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                  osVersion === 'v7'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                RouterOS v7
+              </button>
+              <button
+                type="button"
+                onClick={() => setOsVersion('v6')}
+                className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                  osVersion === 'v6'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                RouterOS v6 (CCR / RB Series)
+              </button>
+            </div>
+          </div>
+
           {/* Format selection tabs */}
           <div className="flex items-center justify-between">
             <div className="flex space-x-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
@@ -92,7 +131,7 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                1. Text Export (.rsc) - Direkomendasikan
+                1. Text Export (.rsc) - Termasuk VLAN & DHCP
               </button>
               <button
                 onClick={() => setActiveTab('binary')}
