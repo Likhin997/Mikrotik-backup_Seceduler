@@ -3327,55 +3327,98 @@ function filterStaticOnlyRsc(content: string): string {
     res.json(db.logs.slice(0, 50));
   });
 
+  // Helper to obtain date & time components strictly in Asia/Jakarta (WIB, UTC+7)
+  function getJakartaDate(date: Date = new Date()) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    const parts = formatter.formatToParts(date);
+    const getPart = (type: string) => parts.find(p => p.type === type)?.value || '00';
+    const year = parseInt(getPart('year'), 10);
+    const month = parseInt(getPart('month'), 10);
+    const day = parseInt(getPart('day'), 10);
+    let hours = parseInt(getPart('hour'), 10);
+    if (hours === 24) hours = 0;
+    const minutes = parseInt(getPart('minute'), 10);
+    const seconds = parseInt(getPart('second'), 10);
+
+    const hourMinuteStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const formattedWib = `${dateStr} ${hourMinuteStr}:${String(seconds).padStart(2, '0')} WIB`;
+
+    return {
+      year,
+      month,
+      day,
+      hours,
+      minutes,
+      seconds,
+      hourMinuteStr,
+      dateStr,
+      formattedWib
+    };
+  }
+
   // 12. App Settings / System info
   app.get('/api/info', (req: Request, res: Response) => {
     const baseUrl = getAppBaseUrl(req);
+    const jakarta = getJakartaDate();
     res.json({
       appName: 'MikroTik Auto Backup Manager',
       version: '1.0.0',
       baseUrl,
       uploadEndpoint: `${baseUrl}/api/backups/upload`,
       storageDirectory: BACKUPS_DIR,
-      time: new Date().toISOString()
+      time: new Date().toISOString(),
+      timezone: 'Asia/Jakarta',
+      formattedTime: jakarta.formattedWib
     });
   });
 
-  // --- Background Scheduler ---
+  // --- Background Scheduler (Runs in Asia/Jakarta / WIB Timezone) ---
   // Runs check every 30 seconds for scheduled automatic backups
   setInterval(async () => {
     const now = new Date();
-    const currentHourMinute = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const todayDateString = now.toDateString();
+    const jakarta = getJakartaDate(now);
+    const currentHourMinute = jakarta.hourMinuteStr;
+    const todayDateString = jakarta.dateStr;
 
     for (const device of db.devices) {
       if (!device.enabled) continue;
 
       let shouldRun = false;
 
-      // 1. Daily schedule check (e.g. 02:00)
+      // 1. Daily schedule check (e.g. 02:00 in Asia/Jakarta)
       if (device.scheduleFrequency === 'daily' && device.scheduleTime === currentHourMinute) {
         // Run once per day
-        const lastBackupDate = device.lastBackupAt ? new Date(device.lastBackupAt).toDateString() : null;
+        const lastBackupDate = device.lastBackupAt ? getJakartaDate(new Date(device.lastBackupAt)).dateStr : null;
         if (lastBackupDate !== todayDateString) {
           shouldRun = true;
         }
-      } else if (device.scheduleFrequency === 'hourly' && now.getMinutes() === 0) {
+      } else if (device.scheduleFrequency === 'hourly' && jakarta.minutes === 0) {
         // Run once per hour
-        const lastBackupHour = device.lastBackupAt ? new Date(device.lastBackupAt).getHours() : -1;
-        const lastBackupDate = device.lastBackupAt ? new Date(device.lastBackupAt).toDateString() : null;
-        if (lastBackupDate !== todayDateString || lastBackupHour !== now.getHours()) {
+        const lastBackupHour = device.lastBackupAt ? getJakartaDate(new Date(device.lastBackupAt)).hours : -1;
+        const lastBackupDate = device.lastBackupAt ? getJakartaDate(new Date(device.lastBackupAt)).dateStr : null;
+        if (lastBackupDate !== todayDateString || lastBackupHour !== jakarta.hours) {
           shouldRun = true;
         }
-      } else if (device.scheduleFrequency === '6hours' && now.getMinutes() === 0 && now.getHours() % 6 === 0) {
+      } else if (device.scheduleFrequency === '6hours' && jakarta.minutes === 0 && jakarta.hours % 6 === 0) {
         shouldRun = true;
       }
 
       if (shouldRun) {
-        console.log(`[AutoScheduler] Waktu jadwal (${device.scheduleTime || device.scheduleFrequency}) tercapai untuk ${device.name}. Menjalankan backup REAL dari router MikroTik...`);
+        console.log(`[AutoScheduler WIB] Waktu jadwal (${device.scheduleTime || device.scheduleFrequency} WIB) tercapai untuk ${device.name}. Menjalankan backup REAL dari router MikroTik...`);
         try {
           await performDeviceBackup(device, 'scheduled');
         } catch (err) {
-          console.error(`[AutoScheduler] Error saat mengeksekusi backup untuk ${device.name}:`, err);
+          console.error(`[AutoScheduler WIB] Error saat mengeksekusi backup untuk ${device.name}:`, err);
         }
       }
     }

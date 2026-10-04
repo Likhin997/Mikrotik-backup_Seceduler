@@ -47,6 +47,27 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout = () => {}
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [currentWibTime, setCurrentWibTime] = useState<string>('');
+
+  React.useEffect(() => {
+    const updateTime = () => {
+      try {
+        const str = new Intl.DateTimeFormat('id-ID', {
+          timeZone: 'Asia/Jakarta',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        }).format(new Date());
+        setCurrentWibTime(str);
+      } catch {
+        setCurrentWibTime('');
+      }
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
@@ -117,6 +138,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Action Buttons */}
           <div className="flex items-center space-x-2">
+            {currentWibTime && (
+              <div
+                className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 shadow-2xs"
+                title="Waktu Server: Asia/Jakarta (WIB, UTC+7)"
+              >
+                <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="font-mono font-bold text-slate-800 text-xs">{currentWibTime}</span>
+                <span className="text-[10px] text-blue-700 font-bold bg-blue-100/70 px-1 py-0.2 rounded border border-blue-200">WIB</span>
+              </div>
+            )}
+
             <button
               onClick={onRefresh}
               disabled={isRefreshing}

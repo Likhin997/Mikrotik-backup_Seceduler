@@ -12,16 +12,39 @@ export function formatDate(dateString?: string): string {
   try {
     const d = new Date(dateString);
     if (isNaN(d.getTime())) return '-';
-    return new Intl.DateTimeFormat('id-ID', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    }).format(d);
+    return (
+      new Intl.DateTimeFormat('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(d) + ' WIB'
+    );
   } catch {
     return dateString;
+  }
+}
+
+export function formatTimeOnly(dateString?: string | Date): string {
+  if (!dateString) return '-';
+  try {
+    const d = typeof dateString === 'string' ? new Date(dateString) : dateString;
+    if (isNaN(d.getTime())) return '-';
+    return (
+      new Intl.DateTimeFormat('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(d) + ' WIB'
+    );
+  } catch {
+    return String(dateString);
   }
 }
 
@@ -53,7 +76,7 @@ export function getFrequencyLabel(frequency: string, time?: string): string {
     case '6hours':
       return 'Tiap 6 Jam';
     case 'daily':
-      return `Harian (pkl. ${time || '02:00'})`;
+      return `Harian (pkl. ${time || '02:00'} WIB)`;
     case 'weekly':
       return 'Mingguan (Tiap Senin)';
     case 'manual':
