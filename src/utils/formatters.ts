@@ -22,7 +22,9 @@ export function formatDate(dateString?: string): string {
         minute: '2-digit',
         second: '2-digit',
         hour12: false
-      }).format(d) + ' WIB'
+      })
+        .format(d)
+        .replace(/\./g, ':') + ' WIB'
     );
   } catch {
     return dateString;
@@ -41,7 +43,9 @@ export function formatTimeOnly(dateString?: string | Date): string {
         minute: '2-digit',
         second: '2-digit',
         hour12: false
-      }).format(d) + ' WIB'
+      })
+        .format(d)
+        .replace(/\./g, ':') + ' WIB'
     );
   } catch {
     return String(dateString);

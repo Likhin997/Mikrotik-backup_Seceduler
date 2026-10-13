@@ -100,7 +100,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 placeholder="Masukkan username admin..."
-                autoComplete="username"
+                autoComplete="off"
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all font-mono"
               />
             </div>

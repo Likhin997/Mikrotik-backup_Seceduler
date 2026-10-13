@@ -16,7 +16,7 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
 }) => {
   const [scriptData, setScriptData] = useState<ScriptResponse | null>(null);
   const [osVersion, setOsVersion] = useState<'v7' | 'v6'>(device?.osVersion === 'v6' ? 'v6' : 'v7');
-  const [activeTab, setActiveTab] = useState<'rsc' | 'binary'>('rsc');
+  const [activeTab, setActiveTab] = useState<'rsc' | 'binary' | 'service'>('rsc');
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,8 +44,38 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
 
   if (!isOpen || !device) return null;
 
-  const currentCode =
+  const targetPort = device.port || (osVersion === 'v6' ? 8728 : 443);
+  const svc = (device.useTls || targetPort === 8729) ? 'api-ssl' : 'api';
+  const serviceCommand =
     osVersion === 'v6'
+      ? `# =========================================================
+# MikroTik RouterOS v6: Konfigurasi Service API (Port ${targetPort})
+# Target Device: ${device.name} (${device.ipHost})
+# Port: ${targetPort} ${targetPort !== 8728 && targetPort !== 8729 ? '(Port Custom)' : '(Default)'}
+# =========================================================
+
+# 1. Aktifkan service API pada port yang diinginkan
+/ip service set ${svc} port=${targetPort} disabled=no
+
+# 2. Verifikasi status service API di router
+/ip service print where name="${svc}"
+`
+      : `# =========================================================
+# MikroTik RouterOS v7: Konfigurasi Service REST API (Port ${targetPort})
+# Target Device: ${device.name} (${device.ipHost})
+# =========================================================
+
+# 1. Aktifkan service WWW/SSL pada port yang diinginkan
+/ip service set ${device.useTls || targetPort === 443 ? 'www-ssl' : 'www'} port=${targetPort} disabled=no
+
+# 2. Verifikasi status service
+/ip service print where name="${device.useTls || targetPort === 443 ? 'www-ssl' : 'www'}"
+`;
+
+  const currentCode =
+    activeTab === 'service'
+      ? serviceCommand
+      : osVersion === 'v6'
       ? activeTab === 'rsc'
         ? scriptData?.scriptContentRscV6 || scriptData?.scriptContentRsc || ''
         : scriptData?.scriptContentBinaryV6 || scriptData?.scriptContentBinary || ''
@@ -121,8 +151,8 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
           </div>
 
           {/* Format selection tabs */}
-          <div className="flex items-center justify-between">
-            <div className="flex space-x-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
               <button
                 onClick={() => setActiveTab('rsc')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
@@ -131,7 +161,7 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                1. Text Export (.rsc) - Termasuk VLAN & DHCP
+                1. Text Export (.rsc)
               </button>
               <button
                 onClick={() => setActiveTab('binary')}
@@ -141,13 +171,23 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                2. Binary System Backup (.backup)
+                2. Binary Backup (.backup)
+              </button>
+              <button
+                onClick={() => setActiveTab('service')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'service'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                3. Aktifkan Service API (Port {targetPort})
               </button>
             </div>
 
             <button
               onClick={handleCopy}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-xs cursor-pointer active:scale-95"
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-xs cursor-pointer active:scale-95 self-start sm:self-auto"
             >
               {copied ? (
                 <>
@@ -157,14 +197,21 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
               ) : (
                 <>
                   <Copy className="w-3.5 h-3.5" />
-                  <span>Salin Seluruh Skrip</span>
+                  <span>Salin Perintah</span>
                 </>
               )}
             </button>
           </div>
 
           {/* Explanation badge */}
-          {activeTab === 'rsc' ? (
+          {activeTab === 'service' ? (
+            <div className="p-3.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 flex items-start space-x-2.5">
+              <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-indigo-950">Aktivasi Port API ({targetPort}):</span> Perintah untuk mengaktifkan port API pada router MikroTik Anda di menu <code className="font-mono bg-white px-1 py-0.5 rounded border border-indigo-200">/ip service</code> agar server ini dapat menarik data konfigurasi secara otomatis pada jadwal yang ditentukan.
+              </div>
+            </div>
+          ) : activeTab === 'rsc' ? (
             <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-start space-x-2.5">
               <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
               <div>

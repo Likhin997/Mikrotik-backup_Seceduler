@@ -189,6 +189,8 @@ export const api = {
     useTls: boolean;
     username?: string;
     password?: string;
+    protocol?: string;
+    osVersion?: string;
   }): Promise<{
     success: boolean;
     identity?: string;
@@ -196,6 +198,7 @@ export const api = {
     model?: string;
     port: number;
     useTls: boolean;
+    osVersion?: string;
     message: string;
   }> {
     const res = await fetchWithAuth('/api/devices/test-connection', {

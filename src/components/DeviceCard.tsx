@@ -71,6 +71,14 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
   };
 
   const getProtocolBadge = () => {
+    if (device.osVersion === 'v6' || device.protocol === 'api_binary') {
+      const isCustom = device.port && device.port !== 8728 && device.port !== 8729;
+      return (
+        <span className="px-2 py-0.5 text-[11px] font-semibold bg-indigo-50 text-indigo-800 border border-indigo-200 rounded">
+          RouterOS v6 API {isCustom ? `(Custom Port: ${device.port})` : `(Port ${device.port || 8728})`}
+        </span>
+      );
+    }
     if (device.protocol === 'push_webhook') {
       return (
         <span className="px-2 py-0.5 text-[11px] font-semibold bg-cyan-50 text-cyan-800 border border-cyan-200 rounded">
@@ -78,9 +86,10 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
         </span>
       );
     }
+    const isCustomV7 = device.port && device.port !== 443 && device.port !== 80;
     return (
       <span className="px-2 py-0.5 text-[11px] font-semibold bg-purple-50 text-purple-800 border border-purple-200 rounded">
-        REST API v7 (Pull)
+        REST API v7 {isCustomV7 ? `(Custom Port: ${device.port})` : `(Port ${device.port || 443})`}
       </span>
     );
   };

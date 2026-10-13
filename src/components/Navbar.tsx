@@ -58,7 +58,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           minute: '2-digit',
           second: '2-digit',
           hour12: false
-        }).format(new Date());
+        })
+          .format(new Date())
+          .replace(/\./g, ':');
         setCurrentWibTime(str);
       } catch {
         setCurrentWibTime('');
@@ -140,7 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center space-x-2">
             {currentWibTime && (
               <div
-                className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 shadow-2xs"
+                className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 shadow-2xs"
                 title="Waktu Server: Asia/Jakarta (WIB, UTC+7)"
               >
                 <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />

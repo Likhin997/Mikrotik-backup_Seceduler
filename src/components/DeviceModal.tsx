@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Server, Shield, Clock, HelpCircle, Check, AlertCircle, RefreshCw, Activity } from 'lucide-react';
+import { X, Server, Shield, Clock, HelpCircle, Check, AlertCircle, RefreshCw, Activity, Terminal, Copy } from 'lucide-react';
 import { RouterDevice } from '../types';
 import { api } from '../services/api';
 
@@ -19,7 +19,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
   const [name, setName] = useState('');
   const [model, setModel] = useState('');
   const [ipHost, setIpHost] = useState('');
-  const [port, setPort] = useState(443);
+  const [port, setPort] = useState<number | string>(443);
   const [osVersion, setOsVersion] = useState<'v7' | 'v6'>('v7');
   const [protocol, setProtocol] = useState<'push_webhook' | 'rest_api' | 'api_binary'>('rest_api');
   const [username, setUsername] = useState('admin');
@@ -29,11 +29,23 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
   const [scheduleTime, setScheduleTime] = useState('02:00');
   const [retentionCount, setRetentionCount] = useState(15);
   const [enabled, setEnabled] = useState(true);
+  const [copiedPortCmd, setCopiedPortCmd] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const activeService = (useTls || Number(port) === 8729) ? 'api-ssl' : 'api';
+  const portCmd = osVersion === 'v6'
+    ? `/ip service set ${activeService} port=${port || 8728} disabled=no`
+    : `/ip service set ${useTls || Number(port) === 443 ? 'www-ssl' : 'www'} port=${port || 443} disabled=no`;
+
+  const handleCopyPortCmd = () => {
+    navigator.clipboard.writeText(portCmd);
+    setCopiedPortCmd(true);
+    setTimeout(() => setCopiedPortCmd(false), 2000);
+  };
 
   const handleTestConnection = async () => {
     if (!ipHost.trim()) {
@@ -43,9 +55,12 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
     setTestingConnection(true);
     setTestResult(null);
     try {
+      const numericPort = Number(port) || (osVersion === 'v6' ? 8728 : 443);
       const res = await api.testConnection({
         ipHost: ipHost.trim(),
-        port: Number(port) || (osVersion === 'v6' ? 8728 : 443),
+        port: numericPort,
+        protocol,
+        osVersion,
         useTls,
         username: username.trim() || 'admin',
         password: password || undefined
@@ -59,7 +74,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       }
       if (res.version?.startsWith('6.')) {
         setOsVersion('v6');
-        if (port === 443 || port === 80) setPort(8728);
+        setProtocol('api_binary');
       } else if (res.version?.startsWith('7.')) {
         setOsVersion('v7');
       }
@@ -72,11 +87,12 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
 
   const handleVersionChange = (newVer: 'v7' | 'v6') => {
     setOsVersion(newVer);
+    const curPort = Number(port);
     if (newVer === 'v6') {
-      if (port === 443 || port === 80) setPort(8728);
+      if (curPort === 443 || curPort === 80) setPort(8728);
       if (protocol === 'rest_api') setProtocol('api_binary');
     } else {
-      if (port === 8728) setPort(443);
+      if (curPort === 8728 || curPort === 8729) setPort(443);
       if (protocol === 'api_binary') setProtocol('rest_api');
     }
   };
@@ -86,9 +102,9 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       setName(initialDevice.name);
       setModel(initialDevice.model || '');
       setIpHost(initialDevice.ipHost);
-      setPort(initialDevice.port || 443);
-      setOsVersion(initialDevice.osVersion || (initialDevice.port === 8728 ? 'v6' : 'v7'));
-      setProtocol(initialDevice.protocol as any || 'rest_api');
+      setPort(initialDevice.port || (initialDevice.osVersion === 'v6' ? 8728 : 443));
+      setOsVersion(initialDevice.osVersion || (initialDevice.protocol === 'api_binary' || initialDevice.port === 8728 || initialDevice.port === 8727 ? 'v6' : 'v7'));
+      setProtocol(initialDevice.protocol as any || (initialDevice.osVersion === 'v6' ? 'api_binary' : 'rest_api'));
       setUsername(initialDevice.username || 'admin');
       setPassword('');
       setUseTls(initialDevice.useTls !== undefined ? initialDevice.useTls : true);
@@ -218,40 +234,6 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
             </div>
           </div>
 
-          {/* IP / Host & Port */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                IP Address / Hostname <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={ipHost}
-                onChange={e => setIpHost(e.target.value)}
-                placeholder="192.168.88.1 atau vpn.kantor.com"
-                required
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 font-mono placeholder-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                <span>Port</span>
-                <span className="text-[10px] text-slate-500 font-normal">
-                  {protocol === 'rest_api' ? 'REST/SSL' : 'Web/Winbox'}
-                </span>
-              </label>
-              <input
-                type="number"
-                value={port}
-                onChange={e => setPort(Number(e.target.value))}
-                min="1"
-                max="65535"
-                placeholder="443"
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 font-mono placeholder-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
-              />
-            </div>
-          </div>
-
           {/* RouterOS Version Selector */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
@@ -286,12 +268,174 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
             </div>
           </div>
 
+          {/* IP / Host & Port (With dedicated Custom Port support) */}
+          <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-3.5 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  IP Address / Hostname <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={ipHost}
+                  onChange={e => setIpHost(e.target.value)}
+                  placeholder="192.168.88.1 atau vpn.kantor.com"
+                  required
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Port {osVersion === 'v6' ? 'API' : 'Layanan'}</span>
+                  {osVersion === 'v6' && Number(port) !== 8728 && Number(port) !== 8729 && (
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 font-bold">
+                      Custom Port
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="number"
+                  value={port}
+                  onChange={e => setPort(e.target.value === '' ? '' : Number(e.target.value))}
+                  min="1"
+                  max="65535"
+                  placeholder={osVersion === 'v6' ? '8728' : '443'}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
+                />
+              </div>
+            </div>
+
+            {/* Quick Port Presets & Custom Port helper */}
+            {osVersion === 'v6' ? (
+              <div className="space-y-2 pt-1 border-t border-slate-200/80">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <span className="text-[11px] font-semibold text-slate-600">Preset Port API v6:</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setPort(8728); setUseTls(false); }}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                        Number(port) === 8728 && !useTls
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      8728 (Default API)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPort(8729); setUseTls(true); }}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                        Number(port) === 8729 && useTls
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      8729 (API-SSL)
+                    </button>
+                    <span className="text-[11px] text-slate-400">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setPort(8727)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                        Number(port) === 8727
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      8727
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPort(58728)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                        Number(port) === 58728
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      58728
+                    </button>
+                  </div>
+                </div>
+
+                {/* Helper command for MikroTik terminal */}
+                <div className="bg-slate-900 rounded-lg p-2.5 text-slate-100 flex items-center justify-between gap-2 shadow-xs">
+                  <div className="flex items-center space-x-2 overflow-hidden">
+                    <Terminal className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    <span className="text-[10px] text-slate-400 shrink-0">Perintah MikroTik Terminal:</span>
+                    <code className="text-[11px] font-mono text-emerald-400 truncate select-all">
+                      {portCmd}
+                    </code>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyPortCmd}
+                    className="shrink-0 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-medium flex items-center space-x-1 border border-slate-700 cursor-pointer transition-colors"
+                    title="Salin perintah untuk dijalankan di Terminal WinBox"
+                  >
+                    {copiedPortCmd ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span className="text-emerald-400 font-semibold">Tersalin</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3 text-slate-400" />
+                        <span>Salin</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 border-t border-slate-200/80">
+                <span className="text-[11px] font-semibold text-slate-600">Preset Port REST v7:</span>
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    type="button"
+                    onClick={() => { setPort(443); setUseTls(true); }}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                      Number(port) === 443 && useTls
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    443 (HTTPS)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPort(80); setUseTls(false); }}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                      Number(port) === 80 && !useTls
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    80 (HTTP)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPort(8443)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                      Number(port) === 8443
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    8443 (Custom)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Backup Mode / Protocol */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
               <span>Metode Penarikan Backup</span>
               <span className="text-[11px] text-blue-600 font-bold">
-                {osVersion === 'v6' ? 'Rekomendasi: RouterOS API port 8728' : 'Rekomendasi: REST API v7'}
+                {osVersion === 'v6' ? `Rekomendasi: RouterOS API port ${port || 8728}` : 'Rekomendasi: REST API v7'}
               </span>
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -324,11 +468,13 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs text-slate-900">RouterOS API v6 (Port 8728)</span>
+                    <span className="font-bold text-xs text-slate-900">
+                      RouterOS API v6 (Port {port || 8728})
+                    </span>
                     {protocol === 'api_binary' && <Check className="w-4 h-4 text-blue-600" />}
                   </div>
                   <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                    Koneksi langsung ke port 8728 API RouterOS v6. Menarik VLAN, DHCP, IP, Firewall secara lengkap.
+                    Koneksi langsung ke port {port || 8728} API RouterOS v6 (bisa custom port). Menarik VLAN, DHCP, IP, Firewall secara lengkap.
                   </p>
                 </button>
               )}
@@ -364,7 +510,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                   onChange={e => setUseTls(e.target.checked)}
                   className="rounded text-blue-600 focus:ring-blue-500 border-slate-300"
                 />
-                <span>Gunakan HTTPS (SSL)</span>
+                <span>{osVersion === 'v6' ? 'Gunakan API-SSL (TLS)' : 'Gunakan HTTPS (SSL)'}</span>
               </label>
             </div>
 
