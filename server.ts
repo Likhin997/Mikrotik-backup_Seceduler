@@ -1866,59 +1866,72 @@ function filterStaticOnlyRsc(content: string): string {
     return { sentences, remaining: Buffer.from(buffer.subarray(offset)) };
   }
 
-  async function queryRouterOsApi(options: {
+  async function queryRouterOsApiSingle(options: {
     hostname: string;
     port: number;
     username?: string;
     password?: string;
     timeoutMs?: number;
     useTls?: boolean;
+    quickCheckOnly?: boolean;
   }): Promise<{
     success: boolean;
     content: string;
     version: string;
     identity: string;
     model: string;
+    isTlsUsed: boolean;
     error?: string;
   }> {
     return new Promise((resolve, reject) => {
       const port = options.port || 8728;
       const timeout = options.timeoutMs || 10000;
-      const isTls = Boolean(options.useTls || port === 8729);
-      const socket = isTls
-        ? tls.connect({ host: options.hostname, port, rejectUnauthorized: false })
-        : net.createConnection({ host: options.hostname, port });
+      const isTls = Boolean(options.useTls);
+      let socket: any;
+
+      try {
+        socket = isTls
+          ? tls.connect({ host: options.hostname, port, rejectUnauthorized: false })
+          : net.createConnection({ host: options.hostname, port });
+      } catch (err: any) {
+        reject(new Error(`Gagal membuka soket ke ${options.hostname}:${port}: ${err.message}`));
+        return;
+      }
 
       let rxBuf: any = Buffer.alloc(0);
       let state: 'CONNECT' | 'LOGIN_SENT' | 'CHALLENGE_SENT' | 'COMMANDS' | 'DONE' = 'CONNECT';
-      let challengeHex = '';
       let currentCmdIndex = 0;
 
-      const commandsToRun = [
-        { cmd: '/system/resource/print', tag: 'resource' },
-        { cmd: '/system/identity/print', tag: 'identity' },
-        { cmd: '/interface/bridge/print', tag: 'bridge' },
-        { cmd: '/interface/vlan/print', tag: 'vlan' },
-        { cmd: '/interface/bridge/port/print', tag: 'bridge_port' },
-        { cmd: '/interface/bridge/vlan/print', tag: 'bridge_vlan' },
-        { cmd: '/interface/list/print', tag: 'iface_list' },
-        { cmd: '/interface/list/member/print', tag: 'iface_member' },
-        { cmd: '/interface/print', tag: 'interface' },
-        { cmd: '/ip/pool/print', tag: 'pool' },
-        { cmd: '/ip/dhcp-server/print', tag: 'dhcp_server' },
-        { cmd: '/ip/dhcp-server/network/print', tag: 'dhcp_network' },
-        { cmd: '/ip/dhcp-server/lease/print', tag: 'dhcp_lease' },
-        { cmd: '/ip/dhcp-client/print', tag: 'dhcp_client' },
-        { cmd: '/ip/address/print', tag: 'address' },
-        { cmd: '/ip/route/print', tag: 'route' },
-        { cmd: '/ip/firewall/filter/print', tag: 'filter' },
-        { cmd: '/ip/firewall/nat/print', tag: 'nat' },
-        { cmd: '/ip/firewall/mangle/print', tag: 'mangle' },
-        { cmd: '/ip/firewall/address-list/print', tag: 'address_list' },
-        { cmd: '/ip/dns/print', tag: 'dns' },
-        { cmd: '/ppp/profile/print', tag: 'ppp_profile' },
-        { cmd: '/ppp/secret/print', tag: 'ppp_secret' }
-      ];
+      const commandsToRun = options.quickCheckOnly
+        ? [
+            { cmd: '/system/identity/print', tag: 'identity' },
+            { cmd: '/system/resource/print', tag: 'resource' }
+          ]
+        : [
+            { cmd: '/system/resource/print', tag: 'resource' },
+            { cmd: '/system/identity/print', tag: 'identity' },
+            { cmd: '/interface/bridge/print', tag: 'bridge' },
+            { cmd: '/interface/vlan/print', tag: 'vlan' },
+            { cmd: '/interface/bridge/port/print', tag: 'bridge_port' },
+            { cmd: '/interface/bridge/vlan/print', tag: 'bridge_vlan' },
+            { cmd: '/interface/list/print', tag: 'iface_list' },
+            { cmd: '/interface/list/member/print', tag: 'iface_member' },
+            { cmd: '/interface/print', tag: 'interface' },
+            { cmd: '/ip/pool/print', tag: 'pool' },
+            { cmd: '/ip/dhcp-server/print', tag: 'dhcp_server' },
+            { cmd: '/ip/dhcp-server/network/print', tag: 'dhcp_network' },
+            { cmd: '/ip/dhcp-server/lease/print', tag: 'dhcp_lease' },
+            { cmd: '/ip/dhcp-client/print', tag: 'dhcp_client' },
+            { cmd: '/ip/address/print', tag: 'address' },
+            { cmd: '/ip/route/print', tag: 'route' },
+            { cmd: '/ip/firewall/filter/print', tag: 'filter' },
+            { cmd: '/ip/firewall/nat/print', tag: 'nat' },
+            { cmd: '/ip/firewall/mangle/print', tag: 'mangle' },
+            { cmd: '/ip/firewall/address-list/print', tag: 'address_list' },
+            { cmd: '/ip/dns/print', tag: 'dns' },
+            { cmd: '/ppp/profile/print', tag: 'ppp_profile' },
+            { cmd: '/ppp/secret/print', tag: 'ppp_secret' }
+          ];
 
       const results: Record<string, any[]> = {};
       let identity = 'MikroTik';
@@ -1926,25 +1939,32 @@ function filterStaticOnlyRsc(content: string): string {
       let model = 'RouterOS';
 
       const timer = setTimeout(() => {
-        socket.destroy();
+        cleanup();
         reject(new Error(`Timeout (${timeout}ms) saat menghubungi MikroTik via API port ${port}${isTls ? ' (TLS)' : ''}`));
       }, timeout);
 
       const cleanup = () => {
         clearTimeout(timer);
-        socket.removeAllListeners();
-        socket.end();
-        socket.destroy();
+        if (socket) {
+          socket.removeAllListeners();
+          socket.end();
+          socket.destroy();
+        }
       };
 
-      socket.on('error', (err) => {
+      socket.on('error', (err: any) => {
         cleanup();
         reject(new Error(`Koneksi RouterOS API port ${port}${isTls ? ' (TLS)' : ''} gagal: ${err.message}`));
       });
 
       const onConnected = () => {
         state = 'LOGIN_SENT';
-        socket.write(encodeSentence(['/login']));
+        // Kirim login langsung dengan kredensial (Standard RouterOS 6.43+ dan 7.x)
+        socket.write(encodeSentence([
+          '/login',
+          `=name=${options.username ? options.username.trim() : 'admin'}`,
+          `=password=${options.password || ''}`
+        ]));
       };
 
       if (isTls) {
@@ -1953,7 +1973,7 @@ function filterStaticOnlyRsc(content: string): string {
         socket.on('connect', onConnected);
       }
 
-      socket.on('data', (chunk) => {
+      socket.on('data', (chunk: any) => {
         rxBuf = Buffer.concat([rxBuf, chunk]);
         const parsed = parseSentencesFromBuffer(rxBuf);
         rxBuf = parsed.remaining;
@@ -1964,9 +1984,9 @@ function filterStaticOnlyRsc(content: string): string {
           if (state === 'LOGIN_SENT') {
             if (sentenceType === '!done') {
               const retWord = sentence.find(w => w.startsWith('=ret='));
-              if (retWord) {
-                // Challenge-based MD5 authentication (RouterOS 6.42 and below)
-                challengeHex = retWord.slice(5);
+              const challengeHex = retWord ? retWord.slice(5) : '';
+              if (challengeHex && challengeHex.length === 32) {
+                // Legacy RouterOS (<= 6.42) MD5 challenge
                 const chal = Buffer.from(challengeHex, 'hex');
                 const zero = Buffer.from([0]);
                 const pwd = Buffer.from(options.password || '', 'utf-8');
@@ -1975,22 +1995,20 @@ function filterStaticOnlyRsc(content: string): string {
                 state = 'CHALLENGE_SENT';
                 socket.write(encodeSentence([
                   '/login',
-                  `=name=${options.username || 'admin'}`,
+                  `=name=${options.username ? options.username.trim() : 'admin'}`,
                   `=response=00${hash}`
                 ]));
               } else {
-                // Direct login accepted
+                // Login langsung diterima (RouterOS 6.43+ & 7.x)
                 state = 'COMMANDS';
                 runNextCommand();
               }
             } else if (sentenceType === '!trap') {
-              // Newer plain login (RouterOS 6.43+ and 7.x)
-              state = 'CHALLENGE_SENT';
-              socket.write(encodeSentence([
-                '/login',
-                `=name=${options.username || 'admin'}`,
-                `=password=${options.password || ''}`
-              ]));
+              const msgWord = sentence.find(w => w.startsWith('=message='));
+              const errorMsg = msgWord ? msgWord.slice(9) : 'Login RouterOS API ditolak';
+              cleanup();
+              reject(new Error(`Autentikasi RouterOS API port ${port} gagal: ${errorMsg}. Periksa username dan password login admin router.`));
+              return;
             }
           } else if (state === 'CHALLENGE_SENT') {
             if (sentenceType === '!done') {
@@ -2000,7 +2018,7 @@ function filterStaticOnlyRsc(content: string): string {
               const msgWord = sentence.find(w => w.startsWith('=message='));
               const errorMsg = msgWord ? msgWord.slice(9) : 'Login RouterOS API ditolak';
               cleanup();
-              reject(new Error(`Autentikasi RouterOS API port ${port} gagal: ${errorMsg}. Periksa login admin router.`));
+              reject(new Error(`Autentikasi RouterOS API port ${port} gagal: ${errorMsg}. Periksa username dan password admin router.`));
               return;
             }
           } else if (state === 'COMMANDS') {
@@ -2286,16 +2304,81 @@ function filterStaticOnlyRsc(content: string): string {
           lines.push('');
         }
 
+        if (options.quickCheckOnly) {
+          resolve({
+            success: true,
+            content: `# MikroTik RouterOS ${version}\n# identity = ${identity}\n# model = ${model}`,
+            version,
+            identity,
+            model,
+            isTlsUsed: isTls
+          });
+          return;
+        }
+
         const rawRsc = lines.join('\n');
         resolve({
           success: true,
           content: filterStaticOnlyRsc(rawRsc),
           version,
           identity,
-          model
+          model,
+          isTlsUsed: isTls
         });
       }
     });
+  }
+
+  // Resilient wrapper: secara otomatis mencoba plaintext dan TLS untuk port kustom / default
+  async function queryRouterOsApi(options: {
+    hostname: string;
+    port: number;
+    username?: string;
+    password?: string;
+    timeoutMs?: number;
+    useTls?: boolean;
+    quickCheckOnly?: boolean;
+  }): Promise<{
+    success: boolean;
+    content: string;
+    version: string;
+    identity: string;
+    model: string;
+    isTlsUsed: boolean;
+    error?: string;
+  }> {
+    const port = options.port || 8728;
+    // Port 8729 standar API-SSL. Port kustom (58728, 8727, 9728, dll) atau 8728 gunakan plaintext secara default kecuali user eksplisit mencentang TLS
+    const preferTls = options.useTls !== undefined ? options.useTls : (port === 8729);
+
+    try {
+      const res = await queryRouterOsApiSingle({ ...options, port, useTls: preferTls });
+      return res;
+    } catch (err: any) {
+      // Jika kegagalan BUKAN karena salah kredensial (username/password), coba fallback mode (TLS <-> Plaintext)
+      const isAuthError = err.message && (
+        err.message.includes('Autentikasi') ||
+        err.message.includes('password') ||
+        err.message.includes('username') ||
+        err.message.includes('ditolak')
+      );
+
+      if (!isAuthError) {
+        console.log(`[RouterOS API] Percobaan port ${port} dengan TLS=${preferTls} gagal (${err.message}), mencoba fallback TLS=${!preferTls}...`);
+        try {
+          const altRes = await queryRouterOsApiSingle({
+            ...options,
+            port,
+            useTls: !preferTls,
+            timeoutMs: Math.min(options.timeoutMs || 8000, 5000)
+          });
+          return altRes;
+        } catch {
+          // Jika fallback juga gagal, lempar error asli
+        }
+      }
+      throw err;
+    }
   }
 
   // Function to pull real configuration from MikroTik RouterOS v7 device
@@ -2986,8 +3069,8 @@ function filterStaticOnlyRsc(content: string): string {
     let parsedVersion = '7.x';
     let detectedModel = device.model || 'MikroTik RouterOS';
 
-    // Check if device can be pulled via REST API (or has credentials configured)
-    const canPull = device.protocol === 'rest_api' || Boolean(device.username && device.password);
+    // Check if device can be pulled via RouterOS API v6 or REST API v7 (or has username configured)
+    const canPull = device.protocol === 'rest_api' || device.protocol === 'api_binary' || device.osVersion === 'v6' || Boolean(device.username);
 
     if (canPull) {
       try {
@@ -3155,10 +3238,11 @@ function filterStaticOnlyRsc(content: string): string {
           const apiRes = await queryRouterOsApi({
             hostname: ipHost.trim(),
             port: targetPort,
-            useTls: Boolean(useTls || targetPort === 8729),
+            useTls: targetPort === 8729 ? true : (useTls !== undefined ? Boolean(useTls) : false),
             username: username ? username.trim() : 'admin',
             password: password || '',
-            timeoutMs: 8000
+            timeoutMs: 6000,
+            quickCheckOnly: true
           });
           if (apiRes.success) {
             res.json({
@@ -3167,14 +3251,14 @@ function filterStaticOnlyRsc(content: string): string {
               version: apiRes.version,
               model: apiRes.model,
               port: targetPort,
-              useTls: Boolean(useTls || targetPort === 8729),
+              useTls: apiRes.isTlsUsed,
               osVersion: apiRes.version?.startsWith('6.') ? 'v6' : 'v7',
-              message: `Berhasil terhubung ke MikroTik ${apiRes.identity} (${apiRes.model}) - RouterOS v${apiRes.version} pada port API ${targetPort}!`
+              message: `Berhasil terhubung ke MikroTik ${apiRes.identity} (${apiRes.model}) - RouterOS v${apiRes.version} pada port API ${targetPort}${apiRes.isTlsUsed ? ' (TLS/SSL)' : ' (Plaintext)'}!`
             });
             return;
           }
         } catch (apiErr: any) {
-          const svcName = (useTls || targetPort === 8729) ? 'api-ssl' : 'api';
+          const svcName = (targetPort === 8729 || (useTls && targetPort !== 8728)) ? 'api-ssl' : 'api';
           res.status(502).json({
             error: `Gagal terhubung ke MikroTik di ${ipHost.trim()}:${targetPort} (RouterOS API): ${apiErr.message}. Pastikan port API ${targetPort} aktif pada menu IP -> Services di MikroTik (/ip service set ${svcName} port=${targetPort} disabled=no) dan firewall mengizinkan koneksi.`
           });
@@ -3273,10 +3357,11 @@ function filterStaticOnlyRsc(content: string): string {
             const apiRes = await queryRouterOsApi({
               hostname: dummyDevice.ipHost,
               port: p,
-              useTls: Boolean(dummyDevice.useTls || p === 8729),
+              useTls: p === 8729 ? true : (dummyDevice.useTls !== undefined ? Boolean(dummyDevice.useTls) : false),
               username: dummyDevice.username,
               password: dummyDevice.password,
-              timeoutMs: 5000
+              timeoutMs: 5000,
+              quickCheckOnly: true
             });
             if (apiRes.success) {
               res.json({
@@ -3285,9 +3370,9 @@ function filterStaticOnlyRsc(content: string): string {
                 version: apiRes.version,
                 model: apiRes.model,
                 port: p,
-                useTls: Boolean(dummyDevice.useTls || p === 8729),
+                useTls: apiRes.isTlsUsed,
                 osVersion: apiRes.version?.startsWith('6.') ? 'v6' : 'v7',
-                message: `Berhasil terhubung ke MikroTik ${apiRes.identity} (${apiRes.model}) - RouterOS v${apiRes.version} via API port ${p} (RouterOS v6 & v7)!`
+                message: `Berhasil terhubung ke MikroTik ${apiRes.identity} (${apiRes.model}) - RouterOS v${apiRes.version} via API port ${p}${apiRes.isTlsUsed ? ' (TLS/SSL)' : ' (Plaintext)'}!`
               });
               return;
             }

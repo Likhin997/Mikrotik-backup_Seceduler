@@ -36,7 +36,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  const activeService = (useTls || Number(port) === 8729) ? 'api-ssl' : 'api';
+  const activeService = (Number(port) === 8729 || (useTls && Number(port) !== 8728)) ? 'api-ssl' : 'api';
   const portCmd = osVersion === 'v6'
     ? `/ip service set ${activeService} port=${port || 8728} disabled=no`
     : `/ip service set ${useTls || Number(port) === 443 ? 'www-ssl' : 'www'} port=${port || 443} disabled=no`;
@@ -72,6 +72,9 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       if (res.identity && !name) {
         setName(res.identity);
       }
+      if (res.useTls !== undefined) {
+        setUseTls(res.useTls);
+      }
       if (res.version?.startsWith('6.')) {
         setOsVersion('v6');
         setProtocol('api_binary');
@@ -89,11 +92,13 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
     setOsVersion(newVer);
     const curPort = Number(port);
     if (newVer === 'v6') {
-      if (curPort === 443 || curPort === 80) setPort(8728);
+      if (curPort === 443 || curPort === 80 || curPort === 8443) setPort(8728);
       if (protocol === 'rest_api') setProtocol('api_binary');
+      setUseTls(false); // v6 API menggunakan plaintext (bukan SSL) secara standar
     } else {
-      if (curPort === 8728 || curPort === 8729) setPort(443);
+      if (curPort === 8728 || curPort === 8729 || curPort === 8727 || curPort === 58728 || curPort === 9728) setPort(443);
       if (protocol === 'api_binary') setProtocol('rest_api');
+      setUseTls(true); // v7 REST API menggunakan HTTPS secara default
     }
   };
 
@@ -103,11 +108,12 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       setModel(initialDevice.model || '');
       setIpHost(initialDevice.ipHost);
       setPort(initialDevice.port || (initialDevice.osVersion === 'v6' ? 8728 : 443));
-      setOsVersion(initialDevice.osVersion || (initialDevice.protocol === 'api_binary' || initialDevice.port === 8728 || initialDevice.port === 8727 ? 'v6' : 'v7'));
-      setProtocol(initialDevice.protocol as any || (initialDevice.osVersion === 'v6' ? 'api_binary' : 'rest_api'));
+      const detectedOs = initialDevice.osVersion || (initialDevice.protocol === 'api_binary' || initialDevice.port === 8728 || initialDevice.port === 8729 || initialDevice.port === 8727 ? 'v6' : 'v7');
+      setOsVersion(detectedOs);
+      setProtocol(initialDevice.protocol as any || (detectedOs === 'v6' ? 'api_binary' : 'rest_api'));
       setUsername(initialDevice.username || 'admin');
       setPassword('');
-      setUseTls(initialDevice.useTls !== undefined ? initialDevice.useTls : true);
+      setUseTls(initialDevice.useTls !== undefined ? initialDevice.useTls : (detectedOs === 'v6' ? false : true));
       setScheduleFrequency(initialDevice.scheduleFrequency || 'daily');
       setScheduleTime(initialDevice.scheduleTime || '02:00');
       setRetentionCount(initialDevice.retentionCount || 15);
@@ -336,7 +342,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                     <span className="text-[11px] text-slate-400">|</span>
                     <button
                       type="button"
-                      onClick={() => setPort(8727)}
+                      onClick={() => { setPort(8727); setUseTls(false); }}
                       className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
                         Number(port) === 8727
                           ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
@@ -347,7 +353,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPort(58728)}
+                      onClick={() => { setPort(58728); setUseTls(false); }}
                       className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
                         Number(port) === 58728
                           ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
@@ -355,6 +361,17 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
                       }`}
                     >
                       58728
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPort(9728); setUseTls(false); }}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                        Number(port) === 9728
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      9728
                     </button>
                   </div>
                 </div>

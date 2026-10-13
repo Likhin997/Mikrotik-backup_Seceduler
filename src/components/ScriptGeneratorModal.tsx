@@ -45,7 +45,7 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
   if (!isOpen || !device) return null;
 
   const targetPort = device.port || (osVersion === 'v6' ? 8728 : 443);
-  const svc = (device.useTls || targetPort === 8729) ? 'api-ssl' : 'api';
+  const svc = (targetPort === 8729 || (device.useTls && targetPort !== 8728)) ? 'api-ssl' : 'api';
   const serviceCommand =
     osVersion === 'v6'
       ? `# =========================================================
