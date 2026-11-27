@@ -70,10 +70,13 @@ export interface BackupRecord {
   model?: string;
   metadata?: {
     interfacesCount?: number;
+    vlansCount?: number;
+    dhcpCount?: number;
     ipAddressesCount?: number;
     firewallRulesCount?: number;
     routesCount?: number;
     usersCount?: number;
+    ipServicesCount?: number;
   };
   notes?: string;
   createdAt: string;
@@ -97,11 +100,173 @@ export interface AdminUser {
   updatedAt: string;
 }
 
+export interface SecuritySettings {
+  blockScanners: boolean;
+  silentDropUnauthorized: boolean;
+  ipAllowlistEnabled: boolean;
+  allowedIps: string[];
+  allowRegisteredDeviceIps: boolean;
+  rateLimitPerMinute: number;
+  hideServerFingerprint: boolean;
+  updatedAt: string;
+}
+
 interface AppDatabase {
   devices: RouterDevice[];
   backups: BackupRecord[];
   logs: ActivityLog[];
   admin: AdminUser;
+  security?: SecuritySettings;
+}
+
+const DEFAULT_SECURITY_SETTINGS: SecuritySettings = {
+  blockScanners: process.env.BLOCK_SCANNERS !== 'false',
+  silentDropUnauthorized: process.env.STEALTH_DROP !== 'false',
+  ipAllowlistEnabled: Boolean(process.env.ALLOWED_IPS && process.env.ALLOWED_IPS.trim().length > 0),
+  allowedIps: process.env.ALLOWED_IPS
+    ? process.env.ALLOWED_IPS.split(',').map(s => s.trim()).filter(Boolean)
+    : ['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10'],
+  allowRegisteredDeviceIps: true,
+  rateLimitPerMinute: 120,
+  hideServerFingerprint: true,
+  updatedAt: new Date().toISOString()
+};
+
+function normalizeIp(rawIp: string | undefined | null): string {
+  if (!rawIp) return '';
+  let ip = rawIp.trim();
+  if (ip.includes(',')) ip = ip.split(',')[0].trim();
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  // Strip IPv4 port if present (e.g. 1.2.3.4:54321)
+  if (/^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(ip)) {
+    ip = ip.split(':')[0];
+  }
+  return ip;
+}
+
+function getClientIp(req: Request): string {
+  const trustProxy = process.env.TRUST_PROXY === 'true';
+  if (trustProxy) {
+    const cfIp = req.headers['cf-connecting-ip'];
+    if (typeof cfIp === 'string' && cfIp.trim()) return normalizeIp(cfIp);
+    const xff = req.headers['x-forwarded-for'];
+    if (typeof xff === 'string' && xff.trim()) return normalizeIp(xff);
+    const realIp = req.headers['x-real-ip'];
+    if (typeof realIp === 'string' && realIp.trim()) return normalizeIp(realIp);
+  }
+  return normalizeIp(req.socket.remoteAddress || req.ip || '');
+}
+
+function isLoopbackIp(ip: string): boolean {
+  return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' || ip.startsWith('127.');
+}
+
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+  let num = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const n = parseInt(part, 10);
+    if (n < 0 || n > 255) return null;
+    num = (num << 8) | n;
+  }
+  return num >>> 0;
+}
+
+function isValidIpOrCidr(entry: string): boolean {
+  const trimmed = entry.trim();
+  if (!trimmed || trimmed.length > 64) return false;
+  if (trimmed === '::1') return true;
+  if (trimmed.includes('/')) {
+    const [base, prefixStr] = trimmed.split('/');
+    if (!base || !prefixStr || !/^\d+$/.test(prefixStr)) return false;
+    const prefix = parseInt(prefixStr, 10);
+    if (ipv4ToInt(base) !== null && prefix >= 0 && prefix <= 32) return true;
+    return false;
+  }
+  if (ipv4ToInt(trimmed) !== null) return true;
+  return net.isIP(trimmed) !== 0;
+}
+
+function ipMatchesEntry(clientIp: string, entry: string): boolean {
+  const target = entry.trim();
+  if (!target) return false;
+  if (clientIp === target) return true;
+  if (target.includes('/')) {
+    const [base, prefixStr] = target.split('/');
+    const prefix = parseInt(prefixStr, 10);
+    const ipInt = ipv4ToInt(clientIp);
+    const baseInt = ipv4ToInt(base);
+    if (ipInt === null || baseInt === null || isNaN(prefix) || prefix < 0 || prefix > 32) {
+      return false;
+    }
+    const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+    return (ipInt & mask) === (baseInt & mask);
+  }
+  return false;
+}
+
+const KNOWN_SCANNER_UA_PATTERNS: RegExp[] = [
+  /shodan/i,
+  /censys/i,
+  /zoomeye/i,
+  /binaryedge/i,
+  /masscan/i,
+  /zgrab/i,
+  /nmap/i,
+  /nikto/i,
+  /sqlmap/i,
+  /nuclei/i,
+  /internetmeasurement/i,
+  /expanse/i,
+  /palo\s*alto\s*networks/i,
+  /netcraft/i,
+  /stretchoid/i,
+  /onyphe/i,
+  /criminalip/i,
+  /leakix/i,
+  /fofa/i,
+  /modat/i,
+  /driftnet/i,
+  /shadowserver/i,
+  /scans\.io/i,
+  /l9explore/i,
+  /l9tcpid/i,
+  /gobuster/i,
+  /dirbuster/i,
+  /ffuf/i,
+  /wpscan/i
+];
+
+const KNOWN_SCANNER_PROBE_PATHS: RegExp[] = [
+  /^\/\.env/i,
+  /^\/\.git/i,
+  /^\/wp-login\.php/i,
+  /^\/wp-admin/i,
+  /^\/xmlrpc\.php/i,
+  /^\/phpmyadmin/i,
+  /^\/pma/i,
+  /^\/actuator/i,
+  /^\/solr/i,
+  /^\/cgi-bin/i,
+  /^\/boaform/i,
+  /^\/hnap1/i,
+  /^\/sdk\/weblanguage/i,
+  /^\/geoserver/i,
+  /^\/vendor\/phpunit/i
+];
+
+function detectScannerProbe(req: Request): string | null {
+  const ua = String(req.headers['user-agent'] || '');
+  for (const rx of KNOWN_SCANNER_UA_PATTERNS) {
+    if (rx.test(ua)) return `Scanner UA (${ua.slice(0, 60)})`;
+  }
+  const reqPath = req.path || '/';
+  for (const rx of KNOWN_SCANNER_PROBE_PATHS) {
+    if (rx.test(reqPath)) return `Probe Path (${reqPath.slice(0, 60)})`;
+  }
+  return null;
 }
 
 export function hashPassword(password: string, salt: string): string {
@@ -130,8 +295,16 @@ function loadDatabase(): AppDatabase {
   };
 
   if (existingDb) {
+    let changed = false;
     if (!existingDb.admin) {
       existingDb.admin = defaultAdmin;
+      changed = true;
+    }
+    if (!existingDb.security) {
+      existingDb.security = { ...DEFAULT_SECURITY_SETTINGS, updatedAt: new Date().toISOString() };
+      changed = true;
+    }
+    if (changed) {
       try {
         fs.writeFileSync(DB_FILE, JSON.stringify(existingDb, null, 2), 'utf-8');
       } catch (e) {}
@@ -218,7 +391,8 @@ function loadDatabase(): AppDatabase {
         message: 'Sistem backup otomatis MikroTik dimulai'
       }
     ],
-    admin: defaultAdmin
+    admin: defaultAdmin,
+    security: { ...DEFAULT_SECURITY_SETTINGS, updatedAt: new Date().toISOString() }
   };
 
   saveDatabase(db);
@@ -315,6 +489,16 @@ add action=dst-nat chain=dstnat comment="Port Forward NVR CCTV" dst-port=8000 in
 add fib name=to-WAN1
 add fib name=to-WAN2
 
+/ip service
+set telnet disabled=yes
+set ftp disabled=yes
+set www disabled=no port=80
+set ssh disabled=no port=22
+set www-ssl disabled=yes port=443
+set api disabled=no port=8728
+set winbox disabled=no port=8291
+set api-ssl disabled=yes port=8729
+
 /system identity
 set name="${deviceName.replace(/[^a-zA-Z0-9_-]/g, '_')}"
 
@@ -346,12 +530,14 @@ function parseRscStats(content: string) {
   const firewallNatMatch = content.match(/\/ip firewall nat[\s\S]*?(?=\/[a-z]|$)/);
   const routesMatch = content.match(/\/ip route[\s\S]*?(?=\/[a-z]|$)/);
   const usersMatch = content.match(/\/user[\s\S]*?(?=\/[a-z]|$)/);
+  const ipServicesMatch = content.match(/\/ip service[\s\S]*?(?=\/[a-z]|$)/);
 
   const ipCount = ipMatch ? (ipMatch[0].match(/add /g) || []).length : 0;
   const filterCount = firewallFilterMatch ? (firewallFilterMatch[0].match(/add /g) || []).length : 0;
   const natCount = firewallNatMatch ? (firewallNatMatch[0].match(/add /g) || []).length : 0;
   const routesCount = routesMatch ? (routesMatch[0].match(/add /g) || []).length : 0;
   const usersCount = usersMatch ? (usersMatch[0].match(/add /g) || []).length : 1;
+  const ipServicesCount = ipServicesMatch ? (ipServicesMatch[0].match(/set /g) || []).length : 0;
 
   let interfacesCount = 5;
   if (interfacesMatch) {
@@ -387,7 +573,8 @@ function parseRscStats(content: string) {
     ipAddressesCount: ipCount || 4,
     firewallRulesCount: filterCount + natCount || 12,
     routesCount: routesCount || 2,
-    usersCount: usersCount || 1
+    usersCount: usersCount || 1,
+    ipServicesCount: ipServicesCount || 8
   };
 }
 
@@ -536,24 +723,137 @@ export async function createServer() {
   const app = express();
   const db = loadDatabase();
 
+  // Anti-Fingerprinting: hilangkan banner Express & ETag agar tidak mudah terdeteksi Shodan/Censys
+  app.disable('x-powered-by');
+  app.disable('etag');
+  if (process.env.TRUST_PROXY === 'true') {
+    app.set('trust proxy', 1);
+  }
+
+  let blockedScannerCount = 0;
+  let blockedIpCount = 0;
+  const recentBlockedEvents: Array<{ timestamp: string; ip: string; reason: string; path: string }> = [];
+  const recordBlocked = (ip: string, reason: string, reqPath: string, kind: 'scanner' | 'ip') => {
+    if (kind === 'scanner') blockedScannerCount += 1;
+    else blockedIpCount += 1;
+    recentBlockedEvents.unshift({
+      timestamp: new Date().toISOString(),
+      ip,
+      reason,
+      path: reqPath.slice(0, 80)
+    });
+    if (recentBlockedEvents.length > 50) recentBlockedEvents.length = 50;
+  };
+
+  // Loopback-only stealth healthcheck for Docker (never leaks app info to external scanners)
+  app.get('/healthz', (req: Request, res: Response) => {
+    const ip = getClientIp(req);
+    if (!isLoopbackIp(ip)) {
+      req.socket.destroy();
+      return;
+    }
+    res.status(200).end();
+  });
+
+  // Block search engine & crawler indexing
+  app.get('/robots.txt', (_req: Request, res: Response) => {
+    res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+  });
+
+  // Per-IP sliding window rate limiter for /api/*
+  const apiRateMap = new Map<string, { count: number; resetAt: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of apiRateMap.entries()) {
+      if (v.resetAt <= now) apiRateMap.delete(k);
+    }
+  }, 60000);
+
+  // Anti-Shodan, Scanner Blocker, IP Allowlist & Security Headers Middleware
+  app.use((req, res, next) => {
+    const sec = db.security || DEFAULT_SECURITY_SETTINGS;
+    const clientIp = getClientIp(req);
+
+    // 1. Always set anti-indexing and minimal security headers (no X-Powered-By / Server fingerprint)
+    res.removeHeader('X-Powered-By');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (isProd) {
+      res.setHeader('X-Frame-Options', 'DENY');
+    }
+    if (req.path.startsWith('/api/')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      res.setHeader('Pragma', 'no-cache');
+    }
+
+    // 2. Block known public internet scanners (Shodan, Censys, ZoomEye, Masscan, Nmap, probe paths)
+    const blockScannersActive = process.env.BLOCK_SCANNERS === 'false' ? false : sec.blockScanners;
+    if (blockScannersActive && !isLoopbackIp(clientIp)) {
+      const detected = detectScannerProbe(req);
+      if (detected) {
+        recordBlocked(clientIp, detected, req.path, 'scanner');
+        if (sec.silentDropUnauthorized) {
+          req.socket.destroy();
+        } else {
+          res.status(404).end();
+        }
+        return;
+      }
+    }
+
+    // 3. IP Allowlist enforcement (env ALLOWED_IPS or UI toggle)
+    const envAllowedList = (process.env.ALLOWED_IPS || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    const allowlistActive = envAllowedList.length > 0 || sec.ipAllowlistEnabled;
+
+    if (allowlistActive && !isLoopbackIp(clientIp)) {
+      const effectiveList = envAllowedList.length > 0 ? envAllowedList : (sec.allowedIps || []);
+      let allowed = effectiveList.some(entry => ipMatchesEntry(clientIp, entry));
+
+      // Optionally allow registered MikroTik router IPs to push backups via webhook
+      if (!allowed && sec.allowRegisteredDeviceIps && req.path.startsWith('/api/backups/upload')) {
+        allowed = db.devices.some(d => normalizeIp(d.ipHost) === clientIp);
+      }
+
+      if (!allowed) {
+        recordBlocked(clientIp, 'IP tidak ada di Allowlist', req.path, 'ip');
+        if (sec.silentDropUnauthorized) {
+          req.socket.destroy();
+        } else {
+          res.status(403).end();
+        }
+        return;
+      }
+    }
+
+    // 4. Rate limiting for /api/* requests (protects against probing & brute-force)
+    if (req.path.startsWith('/api/') && !isLoopbackIp(clientIp)) {
+      const limit = Math.max(20, Math.min(1000, sec.rateLimitPerMinute || 120));
+      const now = Date.now();
+      const bucket = apiRateMap.get(clientIp);
+      if (!bucket || bucket.resetAt <= now) {
+        apiRateMap.set(clientIp, { count: 1, resetAt: now + 60000 });
+      } else {
+        bucket.count += 1;
+        if (bucket.count > limit) {
+          res.status(429).json({ error: 'Terlalu banyak permintaan dari IP ini. Coba lagi dalam 1 menit.' });
+          return;
+        }
+      }
+    }
+
+    next();
+  });
+
   // Middleware for body parsing
   app.use(express.json({ limit: '20mb' }));
   app.use(express.urlencoded({ extended: true, limit: '20mb' }));
   app.use(express.text({ limit: '50mb', type: ['text/plain', 'text/*', 'application/x-www-form-urlencoded'] }));
   app.use(express.raw({ limit: '50mb', type: ['application/octet-stream', 'application/x-routeros'] }));
-
-  // Security Headers & Cache-Control Hardening
-  app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    if (req.path.startsWith('/api/')) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-      res.setHeader('Pragma', 'no-cache');
-    }
-    next();
-  });
 
   // Helper to get base URL
   const getAppBaseUrl = (req: Request) => {
@@ -1929,6 +2229,7 @@ function filterStaticOnlyRsc(content: string): string {
             { cmd: '/ip/firewall/mangle/print', tag: 'mangle' },
             { cmd: '/ip/firewall/address-list/print', tag: 'address_list' },
             { cmd: '/ip/dns/print', tag: 'dns' },
+            { cmd: '/ip/service/print', tag: 'ip_service' },
             { cmd: '/ppp/profile/print', tag: 'ppp_profile' },
             { cmd: '/ppp/secret/print', tag: 'ppp_secret' }
           ];
@@ -2287,6 +2588,31 @@ function filterStaticOnlyRsc(content: string): string {
           lines.push('');
         }
 
+        // 18b. /ip service (Services: api, api-ssl, winbox, www, www-ssl, ssh, telnet, ftp)
+        if (results.ip_service?.length > 0) {
+          lines.push('/ip service');
+          for (const s of results.ip_service) {
+            const svcName = s.name;
+            if (!svcName) continue;
+            const isDisabled = s.disabled === 'true' || s.disabled === true ? 'yes' : 'no';
+            let cmd = `set ${svcName} port=${s.port || 80} disabled=${isDisabled}`;
+            if (s.address && s.address !== '0.0.0.0/0' && s.address.trim() !== '') {
+              cmd += ` address="${s.address}"`;
+            }
+            if (s.certificate && s.certificate !== 'none' && s.certificate.trim() !== '') {
+              cmd += ` certificate="${s.certificate}"`;
+            }
+            if (s.vrf && s.vrf !== 'main' && s.vrf.trim() !== '') {
+              cmd += ` vrf="${s.vrf}"`;
+            }
+            if (s['tls-version'] && s['tls-version'].trim() !== '') {
+              cmd += ` tls-version="${s['tls-version']}"`;
+            }
+            lines.push(cmd);
+          }
+          lines.push('');
+        }
+
         // 19. /ppp profile & secret
         if (results.ppp_profile?.length > 0) {
           const customP = results.ppp_profile.filter((p: any) => !['default', 'default-encryption'].includes(p.name));
@@ -2390,7 +2716,7 @@ function filterStaticOnlyRsc(content: string): string {
     activePort?: number;
   }> {
     const configuredPort = device.port || (device.osVersion === 'v6' ? 8728 : 443);
-    const isV6Mode = device.osVersion === 'v6' || device.protocol === 'api_binary' || configuredPort === 8728 || configuredPort === 8729 || configuredPort === 8727;
+    const isV6Mode = device.osVersion === 'v6' || device.protocol === 'api_binary' || configuredPort === 8728 || configuredPort === 8729 || configuredPort === 8727 || configuredPort === 9728 || configuredPort === 58728;
 
     // If device is configured for RouterOS API (v6 or custom API port), pull directly via RouterOS API protocol
     if (isV6Mode) {
@@ -2399,10 +2725,10 @@ function filterStaticOnlyRsc(content: string): string {
         const apiRes = await queryRouterOsApi({
           hostname: device.ipHost,
           port: configuredPort,
-          useTls: Boolean(device.useTls || configuredPort === 8729),
+          useTls: configuredPort === 8729 ? true : (device.useTls !== undefined ? Boolean(device.useTls) : false),
           username: device.username,
           password: device.password,
-          timeoutMs: 12000
+          timeoutMs: 15000
         });
         if (apiRes.success && apiRes.content) {
           return {
@@ -2417,7 +2743,7 @@ function filterStaticOnlyRsc(content: string): string {
         console.warn(`[API Pull] Gagal menarik via API port ${configuredPort}:`, err.message);
         // If device is strictly v6 or api_binary, do not attempt REST API ports
         if (device.osVersion === 'v6' || device.protocol === 'api_binary') {
-          const svcName = (device.useTls || configuredPort === 8729) ? 'api-ssl' : 'api';
+          const svcName = (configuredPort === 8729 || (device.useTls && configuredPort !== 8728)) ? 'api-ssl' : 'api';
           throw new Error(`Gagal menarik konfigurasi dari MikroTik v6 ${device.ipHost} pada port API ${configuredPort}: ${err.message}. Pastikan port API ${configuredPort} aktif di menu IP -> Services router MikroTik (/ip service set ${svcName} port=${configuredPort} disabled=no).`);
         }
       }
@@ -2987,6 +3313,32 @@ function filterStaticOnlyRsc(content: string): string {
           parts.push('');
         }
 
+        // 18b. /ip service (Services: api, api-ssl, winbox, www, www-ssl, ssh, telnet, ftp)
+        const ipServices = await fetchEndpoint('/rest/ip/service');
+        if (Array.isArray(ipServices) && ipServices.length > 0) {
+          parts.push('/ip service');
+          for (const s of ipServices) {
+            const svcName = s.name;
+            if (!svcName) continue;
+            const isDisabled = s.disabled === 'true' || s.disabled === true ? 'yes' : 'no';
+            let cmd = `set ${svcName} port=${s.port || 80} disabled=${isDisabled}`;
+            if (s.address && s.address !== '0.0.0.0/0' && s.address.trim() !== '') {
+              cmd += ` address="${s.address}"`;
+            }
+            if (s.certificate && s.certificate !== 'none' && s.certificate.trim() !== '') {
+              cmd += ` certificate="${s.certificate}"`;
+            }
+            if (s.vrf && s.vrf !== 'main' && s.vrf.trim() !== '') {
+              cmd += ` vrf="${s.vrf}"`;
+            }
+            if (s['tls-version'] && s['tls-version'].trim() !== '') {
+              cmd += ` tls-version="${s['tls-version']}"`;
+            }
+            parts.push(cmd);
+          }
+          parts.push('');
+        }
+
         // 19. /routing table
         const routingTables = await fetchEndpoint('/rest/routing/table');
         if (Array.isArray(routingTables) && routingTables.length > 0) {
@@ -3164,8 +3516,8 @@ function filterStaticOnlyRsc(content: string): string {
       model: detectedModel,
       metadata: parseRscStats(content),
       notes: trigger === 'scheduled'
-        ? `Backup otomatis terjadwal REAL via REST API v7 (${device.ipHost}:${device.port})`
-        : `Backup live real-time diambil via REST API v7 MikroTik (${device.ipHost}:${device.port})`,
+        ? `Backup otomatis terjadwal REAL via ${device.osVersion === 'v6' ? 'RouterOS API v6' : 'REST API v7'} (${device.ipHost}:${device.port})`
+        : `Backup live real-time diambil via ${device.osVersion === 'v6' ? 'RouterOS API v6' : 'REST API v7'} (${device.ipHost}:${device.port})`,
       createdAt: now.toISOString()
     };
 
@@ -3220,16 +3572,24 @@ function filterStaticOnlyRsc(content: string): string {
 
   // 9b. Test Connection to MikroTik Router
   app.post('/api/devices/test-connection', requireAuth, async (req: Request, res: Response) => {
-    const { ipHost, port, useTls, username, password, protocol, osVersion } = req.body;
+    const { ipHost, port, useTls, username, password, protocol, osVersion, deviceId } = req.body;
     if (!ipHost) {
       res.status(400).json({ error: 'IP Address / Hostname wajib diisi' });
       return;
     }
 
+    let effectivePassword = password;
+    if ((effectivePassword === undefined || effectivePassword === '') && deviceId) {
+      const existing = db.devices.find(d => d.id === deviceId);
+      if (existing?.password) {
+        effectivePassword = existing.password;
+      }
+    }
+
     try {
       const targetPort = Number(port) || (osVersion === 'v6' ? 8728 : 443);
       const isV6Mode = osVersion === 'v6' || protocol === 'api_binary';
-      const isKnownApiPort = targetPort === 8728 || targetPort === 8729 || targetPort === 8727;
+      const isKnownApiPort = targetPort === 8728 || targetPort === 8729 || targetPort === 8727 || targetPort === 9728 || targetPort === 58728;
 
       // 1. If user selected RouterOS v6, or protocol is api_binary, or port is an API port, test RouterOS API directly on targetPort
       if (isV6Mode || isKnownApiPort) {
@@ -3240,7 +3600,7 @@ function filterStaticOnlyRsc(content: string): string {
             port: targetPort,
             useTls: targetPort === 8729 ? true : (useTls !== undefined ? Boolean(useTls) : false),
             username: username ? username.trim() : 'admin',
-            password: password || '',
+            password: effectivePassword || '',
             timeoutMs: 6000,
             quickCheckOnly: true
           });
@@ -3275,7 +3635,7 @@ function filterStaticOnlyRsc(content: string): string {
         protocol: 'rest_api',
         osVersion: 'v7',
         username: username ? username.trim() : 'admin',
-        password: password || '',
+        password: effectivePassword || '',
         useTls: Boolean(useTls),
         webhookToken: '',
         scheduleFrequency: 'daily',
@@ -3493,8 +3853,8 @@ function filterStaticOnlyRsc(content: string): string {
     };
   }
 
-  // 12. App Settings / System info
-  app.get('/api/info', (req: Request, res: Response) => {
+  // 12. App Settings / System info (Authenticated to prevent Shodan/scanner fingerprinting)
+  app.get('/api/info', requireAuth, (req: Request, res: Response) => {
     const baseUrl = getAppBaseUrl(req);
     const jakarta = getJakartaDate();
     res.json({
@@ -3502,10 +3862,99 @@ function filterStaticOnlyRsc(content: string): string {
       version: '1.0.0',
       baseUrl,
       uploadEndpoint: `${baseUrl}/api/backups/upload`,
-      storageDirectory: BACKUPS_DIR,
+      storageDirectory: './data/backups',
       time: new Date().toISOString(),
       timezone: 'Asia/Jakarta',
       formattedTime: jakarta.formattedWib
+    });
+  });
+
+  // 13. Anti-Shodan & Network Security Settings
+  app.get('/api/security/settings', requireAuth, (req: Request, res: Response) => {
+    const sec = db.security || DEFAULT_SECURITY_SETTINGS;
+    const envAllowedIps = (process.env.ALLOWED_IPS || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    res.json({
+      settings: sec,
+      runtime: {
+        clientIp: getClientIp(req),
+        trustProxy: process.env.TRUST_PROXY === 'true',
+        envAllowedIps,
+        blockedScannerCount,
+        blockedIpCount,
+        recentBlockedEvents: recentBlockedEvents.slice(0, 15)
+      }
+    });
+  });
+
+  app.put('/api/security/settings', requireAuth, (req: Request, res: Response) => {
+    const body = req.body || {};
+    const current = db.security || { ...DEFAULT_SECURITY_SETTINGS };
+    const clientIp = getClientIp(req);
+
+    const nextBlockScanners = typeof body.blockScanners === 'boolean' ? body.blockScanners : current.blockScanners;
+    const nextSilentDrop = typeof body.silentDropUnauthorized === 'boolean' ? body.silentDropUnauthorized : current.silentDropUnauthorized;
+    const nextIpAllowlistEnabled = typeof body.ipAllowlistEnabled === 'boolean' ? body.ipAllowlistEnabled : current.ipAllowlistEnabled;
+    const nextAllowRegisteredDeviceIps = typeof body.allowRegisteredDeviceIps === 'boolean' ? body.allowRegisteredDeviceIps : current.allowRegisteredDeviceIps;
+    const nextHideFingerprint = typeof body.hideServerFingerprint === 'boolean' ? body.hideServerFingerprint : current.hideServerFingerprint;
+
+    let nextRateLimit = current.rateLimitPerMinute;
+    if (body.rateLimitPerMinute !== undefined) {
+      const parsed = Number(body.rateLimitPerMinute);
+      if (isNaN(parsed) || parsed < 20 || parsed > 1000) {
+        res.status(400).json({ error: 'Batas permintaan (Rate Limit) harus antara 20 hingga 1000 req/menit.' });
+        return;
+      }
+      nextRateLimit = Math.floor(parsed);
+    }
+
+    let nextAllowedIps = current.allowedIps;
+    if (Array.isArray(body.allowedIps)) {
+      const cleaned = body.allowedIps
+        .map((s: unknown) => (typeof s === 'string' ? s.trim() : ''))
+        .filter(Boolean);
+      const invalid = cleaned.filter((ip: string) => !isValidIpOrCidr(ip));
+      if (invalid.length > 0) {
+        res.status(400).json({ error: `Format IP / CIDR tidak valid: ${invalid.join(', ')}` });
+        return;
+      }
+      nextAllowedIps = Array.from(new Set(cleaned));
+    }
+
+    // Prevent accidental admin self-lockout when enabling IP Allowlist
+    if (nextIpAllowlistEnabled && clientIp && !isLoopbackIp(clientIp)) {
+      const selfAllowed = nextAllowedIps.some(entry => ipMatchesEntry(clientIp, entry));
+      if (!selfAllowed) {
+        nextAllowedIps = Array.from(new Set([...nextAllowedIps, clientIp]));
+      }
+    }
+
+    db.security = {
+      blockScanners: nextBlockScanners,
+      silentDropUnauthorized: nextSilentDrop,
+      ipAllowlistEnabled: nextIpAllowlistEnabled,
+      allowedIps: nextAllowedIps,
+      allowRegisteredDeviceIps: nextAllowRegisteredDeviceIps,
+      rateLimitPerMinute: nextRateLimit,
+      hideServerFingerprint: nextHideFingerprint,
+      updatedAt: new Date().toISOString()
+    };
+
+    db.logs.unshift({
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: 'device_updated',
+      message: `Pengaturan keamanan Anti-Shodan diperbarui (Block Scanner: ${nextBlockScanners ? 'ON' : 'OFF'}, IP Allowlist: ${nextIpAllowlistEnabled ? 'ON' : 'OFF'}, Silent Drop: ${nextSilentDrop ? 'ON' : 'OFF'})`
+    });
+
+    saveDatabase(db);
+    res.json({
+      success: true,
+      settings: db.security,
+      message: 'Pengaturan keamanan & Anti-Shodan berhasil disimpan!'
     });
   });
 
@@ -3565,8 +4014,9 @@ function filterStaticOnlyRsc(content: string): string {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[MikroTik Auto Backup Server] Running on http://localhost:${PORT}`);
+  const BIND_HOST = process.env.BIND_HOST || '0.0.0.0';
+  app.listen(PORT, BIND_HOST, () => {
+    console.log(`[MikroTik Auto Backup Server] Running on http://${BIND_HOST === '0.0.0.0' ? 'localhost' : BIND_HOST}:${PORT}`);
   });
 }
 

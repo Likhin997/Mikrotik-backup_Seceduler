@@ -47,9 +47,9 @@ USER node
 # Persistent volume for backups
 VOLUME ["/app/data"]
 
-# Healthcheck
+# Healthcheck (localhost-only stealth health endpoint)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/stats || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/healthz || exit 1
 
 # Start server using tsx
 CMD ["npx", "tsx", "server.ts"]

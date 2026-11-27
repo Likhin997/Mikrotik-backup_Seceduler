@@ -35,13 +35,26 @@ export const DockerModal: React.FC<DockerModalProps> = ({ isOpen, onClose }) => 
     container_name: mikrotik-backup-app
     restart: unless-stopped
     ports:
-      - "3003:3000"
+      # AMAN ANTI-SHODAN: Hanya bind ke 127.0.0.1 (tidak terekspos ke internet publik)
+      - "\${BIND_IP:-127.0.0.1}:\${HOST_PORT:-3003}:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - BLOCK_SCANNERS=true
+      - STEALTH_DROP=true
+      - TRUST_PROXY=\${TRUST_PROXY:-false}
+    security_opt:
+      - no-new-privileges:true
     volumes:
       # File konfigurasi tersimpan permanen di folder host ./data
-      - ./data:/app/data`;
+      - ./data:/app/data
+
+  # Opsional: Akses aman via Cloudflare Tunnel (0 port terbuka di VPS)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token \${CLOUDFLARE_TUNNEL_TOKEN:-}`;
 
   const quickScript = `chmod +x install.sh
 ./install.sh`;
@@ -49,14 +62,18 @@ export const DockerModal: React.FC<DockerModalProps> = ({ isOpen, onClose }) => 
   const cliRunScript = `# 1. Build image Docker
 docker build -t mikrotik-backup-manager .
 
-# 2. Buat folder penyimpanan di host
+# 2. Buat folder penyimpanan di host (izin aman)
 mkdir -p $(pwd)/data/backups
+chmod 750 $(pwd)/data
 
-# 3. Jalankan container pada port 3003
+# 3. Jalankan container HANYA di 127.0.0.1:3003 (Anti-Shodan)
 docker run -d \\
   --name mikrotik-backup-app \\
   --restart unless-stopped \\
-  -p 3003:3000 \\
+  --security-opt no-new-privileges:true \\
+  -p 127.0.0.1:3003:3000 \\
+  -e BLOCK_SCANNERS=true \\
+  -e STEALTH_DROP=true \\
   -v $(pwd)/data:/app/data \\
   mikrotik-backup-manager`;
 
@@ -289,7 +306,7 @@ docker compose up -d --build`;
 
         {/* Footer */}
         <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
-          <span className="text-slate-500 font-medium">Port Host: 3003 (3003:3000) &bull; Base Image: node:20-alpine</span>
+          <span className="text-slate-500 font-medium">Bind Aman: 127.0.0.1:3003 (Anti-Shodan) &bull; Base Image: node:20-alpine</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg transition-colors cursor-pointer shadow-2xs font-semibold"

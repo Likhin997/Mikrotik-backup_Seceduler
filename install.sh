@@ -24,10 +24,11 @@ if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/
     apt-get update && apt-get install -y docker-compose-plugin || true
 fi
 
-# Buat direktori data untuk volume persistent
+# Buat direktori data untuk volume persistent dengan izin ketat (bukan 777)
 echo "[*] Menyiapkan folder penyimpanan data ./data..."
 mkdir -p data/backups
-chmod -R 777 data
+chown -R 1000:1000 data 2>/dev/null || true
+chmod -R 750 data 2>/dev/null || chmod -R 770 data
 
 # Build dan jalankan container
 echo "[*] Memulai build image Docker dan menjalankan service..."
@@ -39,15 +40,18 @@ else
     docker-compose up -d --build
 fi
 
-# Dapatkan IP host lokal
-LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
-
 echo ""
 echo "========================================================"
-echo "  [✓] Sukses! Aplikasi MikroTik Backup Berjalan!       "
+echo "  [✓] Sukses! Aplikasi Berjalan dalam Mode AMAN!        "
 echo "========================================================"
-echo "Akses web dashboard di browser:"
-echo "👉 http://${LOCAL_IP}:3003 atau http://localhost:3003"
+echo "🔒 Port di-bind HANYA ke 127.0.0.1:3003 (Anti-Shodan)"
+echo "   Port TIDAK terekspos langsung ke internet publik!"
+echo ""
+echo "Cara akses dashboard secara aman:"
+echo "  1. Lokal / Reverse Proxy (Nginx/Caddy) : http://127.0.0.1:3003"
+echo "  2. SSH Tunnel dari laptop Anda         : ssh -L 3003:127.0.0.1:3003 user@IP_SERVER"
+echo "  3. Cloudflare Tunnel (Zero Open Port)  : CLOUDFLARE_TUNNEL_TOKEN=... docker compose --profile tunnel up -d"
+echo "  4. Tailscale/LAN saja (non-publik)     : BIND_IP=<IP_TAILSCALE_ATAU_LAN> docker compose up -d"
 echo ""
 echo "Untuk melihat log: docker logs -f mikrotik-backup-app"
 echo "Untuk menghentikan: docker compose down"

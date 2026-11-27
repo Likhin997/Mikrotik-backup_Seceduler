@@ -7,7 +7,9 @@ import {
   ActivityLog,
   AppInfo,
   AuthUser,
-  AuthResponse
+  AuthResponse,
+  SecuritySettings,
+  SecuritySettingsResponse
 } from '../types';
 
 const TOKEN_KEY = 'mikrotik_admin_token';
@@ -191,6 +193,7 @@ export const api = {
     password?: string;
     protocol?: string;
     osVersion?: string;
+    deviceId?: string;
   }): Promise<{
     success: boolean;
     identity?: string;
@@ -271,5 +274,27 @@ export const api = {
     const res = await fetchWithAuth('/api/info');
     if (!res.ok) throw new Error('Gagal memuat info aplikasi');
     return res.json();
+  },
+
+  async getSecuritySettings(): Promise<SecuritySettingsResponse> {
+    const res = await fetchWithAuth('/api/security/settings');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Gagal memuat pengaturan keamanan');
+    }
+    return res.json();
+  },
+
+  async updateSecuritySettings(data: Partial<SecuritySettings>): Promise<{ success: boolean; settings: SecuritySettings; message: string }> {
+    const res = await fetchWithAuth('/api/security/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(result.error || 'Gagal menyimpan pengaturan keamanan');
+    }
+    return result;
   }
 };

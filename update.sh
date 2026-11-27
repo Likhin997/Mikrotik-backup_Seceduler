@@ -23,15 +23,12 @@ else
     docker-compose up -d --build
 fi
 
-# 3. Dapatkan IP host
-LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
-
 echo ""
 echo "========================================================"
 echo "  [✓] Sukses! Source code berhasil diupdate!           "
 echo "========================================================"
-echo "Akses dashboard di browser:"
-echo "👉 http://${LOCAL_IP}:3003 atau http://localhost:3003"
+echo "🔒 Aplikasi berjalan di 127.0.0.1:3003 (Anti-Shodan)"
+echo "   Akses melalui Reverse Proxy / Cloudflare Tunnel / SSH Tunnel / VPN."
 echo ""
 echo "Catatan: Semua data backup & konfigurasi di ./data tetap aman."
 echo "Untuk melihat log: docker logs -f mikrotik-backup-app"

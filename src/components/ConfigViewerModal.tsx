@@ -112,9 +112,12 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
         ) {
           currentCategory = 'routing';
         } else if (
+          lower.startsWith('/ip service')
+        ) {
+          currentCategory = 'ip_service';
+        } else if (
           lower.startsWith('/system') ||
           lower.startsWith('/ip dns') ||
-          lower.startsWith('/ip service') ||
           lower.startsWith('/ip neighbor') ||
           lower.startsWith('/tool') ||
           lower.startsWith('/user') ||
@@ -144,6 +147,7 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
       interface: 0,
       ip_address: 0,
       dhcp_pool: 0,
+      ip_service: 0,
       firewall_filter: 0,
       firewall_nat: 0,
       routing: 0,
@@ -166,6 +170,7 @@ export const ConfigViewerModal: React.FC<ConfigViewerModalProps> = ({
       { id: 'interface', name: 'Interfaces & VLAN', count: counts.interface },
       { id: 'ip_address', name: 'IP Address', count: counts.ip_address },
       { id: 'dhcp_pool', name: 'DHCP & Pool', count: counts.dhcp_pool },
+      { id: 'ip_service', name: 'IP Services', count: counts.ip_service },
       { id: 'firewall_filter', name: 'Firewall Filter', count: counts.firewall_filter },
       { id: 'firewall_nat', name: 'Firewall NAT', count: counts.firewall_nat },
       { id: 'routing', name: 'Routing', count: counts.routing },

@@ -25,6 +25,7 @@ interface NavbarProps {
   onOpenAddDevice: () => void;
   onOpenUpload: () => void;
   onOpenDocker: () => void;
+  onOpenSecurity: () => void;
   onRefresh: () => void;
   isRefreshing: boolean;
   totalBackups: number;
@@ -39,6 +40,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAddDevice,
   onOpenUpload,
   onOpenDocker,
+  onOpenSecurity,
   onRefresh,
   isRefreshing,
   totalBackups,
@@ -161,6 +163,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
+              onClick={onOpenSecurity}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 rounded-lg transition-colors shadow-xs cursor-pointer"
+              title="Keamanan & Anti-Shodan"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden lg:inline">Anti-Shodan</span>
+            </button>
+
+            <button
               onClick={onOpenDocker}
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-cyan-800 bg-cyan-50 hover:bg-cyan-100/80 border border-cyan-200 rounded-lg transition-colors shadow-xs cursor-pointer"
               title="Panduan Docker & Compose"
@@ -217,6 +228,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <span>Auto-Logout 30 Menit Idle</span>
                         </p>
                       </div>
+
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onOpenSecurity();
+                        }}
+                        className="w-full text-left px-3.5 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-50 flex items-center space-x-2 transition-colors cursor-pointer"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Keamanan &amp; Anti-Shodan</span>
+                      </button>
 
                       <button
                         onClick={() => {

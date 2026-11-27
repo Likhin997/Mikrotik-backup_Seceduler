@@ -63,7 +63,8 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
         osVersion,
         useTls,
         username: username.trim() || 'admin',
-        password: password || undefined
+        password: password || undefined,
+        deviceId: initialDevice?.id
       });
       setTestResult({ success: true, message: res.message });
       if (res.model && !model) {
@@ -584,18 +585,39 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
 
             {testResult && (
               <div
-                className={`p-2.5 rounded-lg text-xs flex items-start space-x-2 border animate-in fade-in duration-150 ${
+                className={`p-2.5 rounded-lg text-xs space-y-2 border animate-in fade-in duration-150 ${
                   testResult.success
                     ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
                     : 'bg-rose-50 text-rose-900 border-rose-200'
                 }`}
               >
-                {testResult.success ? (
-                  <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex items-start space-x-2">
+                  {testResult.success ? (
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  )}
+                  <span className="leading-snug">{testResult.message}</span>
+                </div>
+                {!testResult.success && testResult.message.includes('/ip service set') && (
+                  <div className="bg-slate-900 text-slate-100 rounded-md p-2 flex items-center justify-between text-[11px] font-mono">
+                    <span className="truncate select-all text-emerald-400">
+                      {testResult.message.match(/\/ip service set [^)]+/)?.[0] || portCmd}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cmd = testResult.message.match(/\/ip service set [^)]+/)?.[0] || portCmd;
+                        navigator.clipboard.writeText(cmd);
+                        setCopiedPortCmd(true);
+                        setTimeout(() => setCopiedPortCmd(false), 2000);
+                      }}
+                      className="ml-2 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[10px] font-sans font-semibold shrink-0 border border-slate-700 cursor-pointer"
+                    >
+                      {copiedPortCmd ? 'Tersalin' : 'Salin Perintah'}
+                    </button>
+                  </div>
                 )}
-                <span className="leading-snug">{testResult.message}</span>
               </div>
             )}
           </div>

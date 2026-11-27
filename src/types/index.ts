@@ -46,6 +46,7 @@ export interface BackupRecord {
     firewallRulesCount?: number;
     routesCount?: number;
     usersCount?: number;
+    ipServicesCount?: number;
   };
   notes?: string;
   createdAt: string;
@@ -128,4 +129,32 @@ export interface AuthResponse {
   success: boolean;
   token: string;
   user: AuthUser;
+}
+
+export interface SecuritySettings {
+  blockScanners: boolean;
+  silentDropUnauthorized: boolean;
+  ipAllowlistEnabled: boolean;
+  allowedIps: string[];
+  allowRegisteredDeviceIps: boolean;
+  rateLimitPerMinute: number;
+  hideServerFingerprint: boolean;
+  updatedAt?: string;
+}
+
+export interface SecuritySettingsResponse {
+  settings: SecuritySettings;
+  runtime: {
+    clientIp: string;
+    trustProxy: boolean;
+    envAllowedIps: string[];
+    blockedScannerCount: number;
+    blockedIpCount: number;
+    recentBlockedEvents: Array<{
+      timestamp: string;
+      ip: string;
+      reason: string;
+      path: string;
+    }>;
+  };
 }

@@ -29,6 +29,7 @@ import { BackupTable } from './components/BackupTable';
 import { RestoreGuideModal } from './components/RestoreGuideModal';
 import { ActivityLogsView } from './components/ActivityLogsView';
 import { DockerModal } from './components/DockerModal';
+import { SecurityModal } from './components/SecurityModal';
 import { LoginPage } from './components/LoginPage';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { Toast, ToastMessage } from './components/Toast';
@@ -69,6 +70,7 @@ export default function App() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isRestoreGuideOpen, setIsRestoreGuideOpen] = useState(false);
   const [isDockerModalOpen, setIsDockerModalOpen] = useState(false);
+  const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
 
   // Deletion confirms
   const [deletingDevice, setDeletingDevice] = useState<RouterDevice | null>(null);
@@ -331,6 +333,7 @@ export default function App() {
         }}
         onOpenUpload={() => setIsUploadModalOpen(true)}
         onOpenDocker={() => setIsDockerModalOpen(true)}
+        onOpenSecurity={() => setIsSecurityModalOpen(true)}
         onRefresh={() => loadData(false)}
         isRefreshing={isRefreshing}
         totalBackups={backups.length}
@@ -646,6 +649,16 @@ export default function App() {
       <DockerModal
         isOpen={isDockerModalOpen}
         onClose={() => setIsDockerModalOpen(false)}
+      />
+
+      {/* Security & Anti-Shodan Modal */}
+      <SecurityModal
+        isOpen={isSecurityModalOpen}
+        onClose={() => setIsSecurityModalOpen(false)}
+        onSaved={(msg) => {
+          showToast(msg, 'success');
+          loadData(true);
+        }}
       />
 
       {/* Change Password Modal */}

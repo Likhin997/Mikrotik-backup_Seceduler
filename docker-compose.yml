@@ -7,18 +7,45 @@ services:
     container_name: mikrotik-backup-app
     restart: unless-stopped
     ports:
-      - "3003:3000"
+      # AMAN ANTI-SHODAN: Default hanya bind ke 127.0.0.1 (localhost), TIDAK terekspos ke internet publik!
+      # Akses aman via Cloudflare Tunnel, Tailscale/WireGuard VPN, SSH Tunnel, atau Nginx Reverse Proxy.
+      # Jika benar-benar perlu akses LAN lokal saja, set BIND_IP=<IP_LAN_SERVER> di file .env (JANGAN 0.0.0.0 di VPS publik).
+      - "${BIND_IP:-127.0.0.1}:${HOST_PORT:-3003}:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
-      # Opsional: Jika menggunakan domain / reverse proxy (Nginx / Cloudflare Tunnel / Traefik / IP VPS)
-      # - APP_URL=http://192.168.1.100:3003
+      # Set TRUST_PROXY=true jika berada di belakang Nginx / Caddy / Cloudflare Tunnel
+      - TRUST_PROXY=${TRUST_PROXY:-false}
+      # Opsional: Batasi akses hanya dari IP/CIDR tertentu (pisahkan koma)
+      # - ALLOWED_IPS=127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,100.64.0.0/10
+      # Blokir otomatis bot/scanner Shodan, Censys, ZoomEye, Masscan, Nmap (default: true)
+      - BLOCK_SCANNERS=${BLOCK_SCANNERS:-true}
+      # Drop koneksi diam-diam tanpa banner HTTP untuk IP/scanner ilegal (default: true)
+      - STEALTH_DROP=${STEALTH_DROP:-true}
+      # Opsional: URL publik jika memakai domain via Reverse Proxy / Cloudflare Tunnel
+      # - APP_URL=https://backup.domainanda.com
     volumes:
       # Data konfigurasi router & file backup MikroTik tersimpan permanen di folder host ./data
       - ./data:/app/data
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/stats"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # Opsional (REKOMENDASI ZERO-PORT EXPOSURE):
+  # Jalankan dengan: CLOUDFLARE_TUNNEL_TOKEN=<token> docker compose --profile tunnel up -d
+  # Tidak perlu membuka port apapun di firewall VPS -> 100% tidak terdeteksi Shodan!
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: mikrotik-backup-tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - mikrotik-backup
+    security_opt:
+      - no-new-privileges:true
